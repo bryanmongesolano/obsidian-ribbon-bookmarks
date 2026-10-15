@@ -1,0 +1,365 @@
+/* ==========================================================================
+   Ribbon Bookmarks — Estilos minimalistas y nativos para Obsidian
+   ========================================================================== */
+
+/* Suprimir el tooltip negro nativo de Obsidian únicamente mientras se arrastra un ítem */
+body.rb-is-dragging {
+	--no-tooltip: true;
+}
+
+body.rb-is-dragging .tooltip {
+	display: none !important;
+}
+
+/* Barra indicadora de posición al arrastrar (barra lateral y dentro de carpetas) */
+.rb-drop-indicator-bar {
+	position: fixed;
+	height: 4px;
+	border-radius: 999px;
+	background-color: var(--interactive-accent);
+	opacity: 0.9;
+	z-index: 10005;
+	pointer-events: none;
+	transition: top 60ms ease-out, left 60ms ease-out, width 60ms ease-out;
+}
+
+/* Separadores en la barra izquierda */
+.side-dock-actions .side-dock-ribbon-action.rb-ribbon-separator {
+	height: 1px;
+	min-height: 1px;
+	width: 70%;
+	padding: 4px 0;
+	margin: 2px auto;
+	cursor: default;
+}
+
+.side-dock-actions .side-dock-ribbon-action.rb-ribbon-separator:hover {
+	background-color: transparent;
+}
+
+.side-dock-actions .side-dock-ribbon-action.rb-ribbon-separator::before {
+	content: "";
+	display: block;
+	height: 1px;
+	width: 100%;
+	background-color: var(--icon-color);
+	opacity: 0.45;
+}
+
+/* No forzar fill sobre íconos de línea de Lucide */
+.side-dock-actions .side-dock-ribbon-action.rb-ribbon-item svg.svg-icon {
+	color: var(--icon-color);
+}
+
+/* Resaltado morado al arrastrar sobre el centro de un ítem (crear o entrar a carpeta) */
+.side-dock-actions .side-dock-ribbon-action.rb-drop-inside,
+.rb-folder-popup-item.rb-drop-inside {
+	background-color: var(--background-modifier-active-hover) !important;
+	outline: 2px dashed var(--interactive-accent) !important;
+	outline-offset: -2px;
+	border-radius: var(--radius-s);
+}
+
+.side-dock-actions .side-dock-ribbon-action.rb-is-dragging-source,
+.rb-folder-popup-item.rb-is-dragging-source {
+	opacity: 0.35;
+}
+
+/* ==========================================================================
+   Popup de carpeta en cascada
+   ========================================================================== */
+.menu.rb-folder-popup {
+	min-width: 190px;
+	max-width: 300px;
+}
+
+.rb-folder-popup .menu-item {
+	border-radius: var(--radius-s);
+	transition: background-color 90ms ease, color 90ms ease;
+}
+
+/* Mismo hover que los íconos del Ribbon */
+.rb-folder-popup .menu-item:hover,
+.rb-folder-popup .menu-item.tappable:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.rb-folder-popup .menu-item:hover .menu-item-icon {
+	color: var(--icon-color-hover);
+}
+
+.rb-drag-ghost {
+	position: fixed;
+	z-index: 10006;
+	pointer-events: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	border-radius: var(--radius-s);
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	box-shadow: var(--shadow-s);
+	font-size: var(--font-ui-small);
+}
+
+/* ==========================================================================
+   Modal Minimalista (Nuevo / Modificar ítem o carpeta)
+   ========================================================================== */
+.modal.rb-bookmark-modal {
+	width: min(540px, 92vw);
+	padding: 16px 20px 18px;
+}
+
+/* Encabezado: título a la izquierda y X a la derecha, en la misma línea, con una sola línea divisora */
+.modal.rb-bookmark-modal .modal-header {
+	display: flex;
+	align-items: center;
+	min-height: 30px;
+	height: auto;
+	margin: 0 0 12px 0;
+	padding: 0 32px 10px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.modal.rb-bookmark-modal .modal-title {
+	margin: 0;
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	line-height: 24px;
+	text-align: start;
+}
+
+.modal.rb-bookmark-modal .modal-close-button {
+	top: 14px;
+	inset-inline-end: 16px;
+	height: 26px;
+	width: 26px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin: 0;
+	padding: 0;
+}
+
+/* Sin líneas separadoras entre los campos del modal */
+.modal.rb-bookmark-modal .setting-item {
+	border-top: none !important;
+	border-bottom: none !important;
+	padding: 5px 0;
+}
+
+/* Campos de texto amplios e iguales para Nombre, URL y Archivo */
+.modal.rb-bookmark-modal .setting-item-control input.rb-wide-input {
+	width: 300px;
+	max-width: 100%;
+}
+
+/* Etiqueta con ícono "?" de ayuda al lado */
+.rb-setting-label-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.rb-help-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-faint);
+	cursor: help;
+	transition: color 120ms ease;
+}
+
+.rb-help-icon:hover {
+	color: var(--text-normal);
+}
+
+.rb-help-icon svg.svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+/* Resultados del Vault (solo visibles mientras se escribe una ruta) */
+.rb-vault-file-results {
+	margin: 4px 0 8px;
+	max-height: 140px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: 6px;
+	background-color: var(--background-secondary);
+}
+
+.rb-vault-file-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.rb-vault-file-row:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+.rb-vault-file-row-icon {
+	display: inline-flex;
+	align-items: center;
+	color: var(--icon-color);
+}
+
+.rb-vault-file-row-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ==========================================================================
+   Sección de Íconos (previsualización a la izquierda + pestañas a la derecha)
+   ========================================================================== */
+.rb-icon-picker-wrapper {
+	margin-top: 8px;
+	margin-bottom: 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: 10px;
+	background-color: var(--background-secondary);
+}
+
+.rb-icon-picker-topbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+.rb-icon-preview-box {
+	width: 36px;
+	height: 36px;
+	flex-shrink: 0;
+	border-radius: var(--radius-s);
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--icon-color);
+}
+
+.rb-icon-preview-box svg {
+	width: 20px;
+	height: 20px;
+}
+
+.rb-icon-tabs-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+}
+
+.rb-icon-tab-btn {
+	font-size: var(--font-ui-small);
+	padding: 4px 10px;
+	cursor: pointer;
+}
+
+.rb-icon-tab-btn.is-active {
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.rb-icon-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+	gap: 6px;
+	max-height: 176px;
+	overflow-y: auto;
+	padding: 2px;
+}
+
+.rb-icon-cell {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 38px;
+	border-radius: var(--radius-s);
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	color: var(--icon-color);
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.rb-icon-cell:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--icon-color-hover);
+}
+
+.rb-icon-cell.is-selected {
+	border-color: var(--interactive-accent);
+	background-color: var(--background-modifier-active-hover);
+}
+
+.rb-icon-cell-add {
+	border-style: dashed;
+}
+
+.rb-icon-cell-svg {
+	width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.rb-icon-cell-svg svg {
+	width: 18px;
+	height: 18px;
+}
+
+.rb-internet-search-bar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.rb-internet-search-bar .rb-icon-search-input {
+	margin-bottom: 0;
+	flex: 1;
+}
+
+.rb-search-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 32px;
+	padding: 0;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+
+.rb-modal-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-top: 10px;
+	padding-top: 4px;
+}
+
+.rb-modal-footer-right {
+	display: flex;
+	gap: 8px;
+	margin-left: auto;
+}

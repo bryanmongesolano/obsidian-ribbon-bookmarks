@@ -1,0 +1,30 @@
+{
+	"name": "obsidian-ribbon-bookmarks",
+	"version": "1.1.0",
+	"description": "A bookmark bar in the left ribbon: web links, any file, nested folders, separators, drag and drop, and monochrome icons.",
+	"main": "main.js",
+	"type": "module",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"deploy": "npm run build && cp manifest.json main.js styles.css \"$OBSIDIAN_VAULT_PLUGINS/ribbon-bookmarks/\""
+	},
+	"keywords": [
+		"obsidian",
+		"ribbon",
+		"bookmarks",
+		"folders"
+	],
+	"license": "MIT",
+	"author": "Bryan Monge",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks.git"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.17",
+		"esbuild": "0.25.5",
+		"obsidian": "latest",
+		"typescript": "^5.8.3"
+	}
+}
