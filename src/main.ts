@@ -19,11 +19,12 @@ import { getLucideIconForFilePath, getOrRegisterItemIconId, resolveAutoIconForUr
 import { TFn, LangSetting, createTranslator, resolveLang } from "./i18n";
 import { BookmarkItemModal } from "./modals";
 import { getTabBehavior } from "./tabs";
-import { CustomSavedIcon, RibbonBookmarkItem, RibbonBookmarksSettings } from "./types";
+import { CustomSavedIcon, RibbonBookmarkItem, RibbonBookmarksSettings, SavedOnlineIcon } from "./types";
 
 const DEFAULT_SETTINGS: RibbonBookmarksSettings = {
 	items: [],
 	customIcons: [],
+	savedOnlineIcons: [],
 	language: "auto",
 };
 
@@ -119,6 +120,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 		if (!Array.isArray(this.settings.items)) this.settings.items = [];
 		if (!Array.isArray(this.settings.customIcons)) this.settings.customIcons = [];
+		if (!Array.isArray(this.settings.savedOnlineIcons)) this.settings.savedOnlineIcons = [];
 		if (this.settings.language !== "auto" && this.settings.language !== "es" && this.settings.language !== "en") {
 			this.settings.language = "auto";
 		}
@@ -155,6 +157,17 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 	private async saveCustomIcon(icon: CustomSavedIcon): Promise<void> {
 		this.settings.customIcons.unshift(icon);
+		await this.saveData(this.settings);
+	}
+
+	/** Guarda un ícono obtenido de la búsqueda en internet para poder reutilizarlo. */
+	private async saveOnlineIcon(icon: SavedOnlineIcon): Promise<void> {
+		const idx = this.settings.savedOnlineIcons.findIndex((s) => s.key === icon.key);
+		if (idx !== -1) {
+			this.settings.savedOnlineIcons[idx] = icon;
+		} else {
+			this.settings.savedOnlineIcons.unshift(icon);
+		}
 		await this.saveData(this.settings);
 	}
 
@@ -1449,7 +1462,9 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			isNew: true,
 			t: this.t,
 			customIcons: this.settings.customIcons,
+			savedOnlineIcons: this.settings.savedOnlineIcons,
 			onSaveCustomIcon: (ic) => this.saveCustomIcon(ic),
+			onSaveOnlineIcon: (ic) => this.saveOnlineIcon(ic),
 			onSubmit: async (created) => {
 				if (typeof insertIndex === "number" && insertIndex >= 0 && insertIndex <= this.settings.items.length) {
 					this.settings.items.splice(insertIndex, 0, created);
@@ -1469,7 +1484,9 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			isNew: false,
 			t: this.t,
 			customIcons: this.settings.customIcons,
+			savedOnlineIcons: this.settings.savedOnlineIcons,
 			onSaveCustomIcon: (ic) => this.saveCustomIcon(ic),
+			onSaveOnlineIcon: (ic) => this.saveOnlineIcon(ic),
 			onSubmit: async (updated) => {
 				const idx = containerList.findIndex((x) => x.id === item.id);
 				if (idx !== -1) {

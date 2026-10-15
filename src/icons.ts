@@ -340,7 +340,7 @@ export function getOrRegisterItemIconId(item: RibbonBookmarkItem): string {
 	if (item.type === "separator") {
 		return "";
 	}
-	if (item.iconSource === "custom-svg" && item.customSvg) {
+	if ((item.iconSource === "custom-svg" || item.iconSource === "online") && item.customSvg) {
 		const customId = `rb-custom-icon-${item.id}`;
 		addIcon(customId, item.customSvg);
 		return customId;

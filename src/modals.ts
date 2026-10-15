@@ -11,7 +11,7 @@ import {
 	searchOnlineMonochromeIcons,
 } from "./icons";
 import { TFn } from "./i18n";
-import { CustomSavedIcon, RibbonBookmarkItem } from "./types";
+import { CustomSavedIcon, RibbonBookmarkItem, SavedOnlineIcon } from "./types";
 
 export interface BookmarkModalOptions {
 	app: App;
@@ -19,7 +19,9 @@ export interface BookmarkModalOptions {
 	isNew?: boolean;
 	t: TFn;
 	customIcons: CustomSavedIcon[];
+	savedOnlineIcons: SavedOnlineIcon[];
 	onSaveCustomIcon: (icon: CustomSavedIcon) => Promise<void> | void;
+	onSaveOnlineIcon: (icon: SavedOnlineIcon) => Promise<void> | void;
 	onSubmit: (result: RibbonBookmarkItem) => Promise<void> | void;
 	onDelete?: (item: RibbonBookmarkItem) => Promise<void> | void;
 }
@@ -29,7 +31,9 @@ export class BookmarkItemModal extends Modal {
 	private isNew: boolean;
 	private t: TFn;
 	private customIcons: CustomSavedIcon[];
+	private savedOnlineIcons: SavedOnlineIcon[];
 	private onSaveCustomIconCb: (icon: CustomSavedIcon) => Promise<void> | void;
+	private onSaveOnlineIconCb: (icon: SavedOnlineIcon) => Promise<void> | void;
 	private onSubmitCb: (result: RibbonBookmarkItem) => Promise<void> | void;
 	private onDeleteCb?: (item: RibbonBookmarkItem) => Promise<void> | void;
 	private activeIconTab: "custom" | "lucide" | "internet" = "custom";
@@ -45,7 +49,9 @@ export class BookmarkItemModal extends Modal {
 		this.iconTouchedByUser = !this.isNew;
 		this.t = opts.t;
 		this.customIcons = opts.customIcons;
+		this.savedOnlineIcons = opts.savedOnlineIcons ?? [];
 		this.onSaveCustomIconCb = opts.onSaveCustomIcon;
+		this.onSaveOnlineIconCb = opts.onSaveOnlineIcon;
 		this.onSubmitCb = opts.onSubmit;
 		this.onDeleteCb = opts.onDelete;
 
@@ -62,7 +68,10 @@ export class BookmarkItemModal extends Modal {
 			};
 		}
 
-		if (this.draft.iconSource === "lucide" || this.draft.type === "folder" || this.draft.type === "file") {
+		// Si el ícono vino de la búsqueda en internet, se abre directamente esa pestaña
+		if (this.draft.iconSource === "online") {
+			this.activeIconTab = "internet";
+		} else if (this.draft.iconSource === "lucide" || this.draft.type === "folder" || this.draft.type === "file") {
 			this.activeIconTab = "lucide";
 		} else {
 			this.activeIconTab = "custom";
@@ -251,7 +260,12 @@ export class BookmarkItemModal extends Modal {
 		const target = cells.find((c) => c.getAttribute("aria-label") === label);
 		if (!target) return;
 		target.addClass("is-selected");
-		if (grid.firstElementChild !== target) {
+
+		// En la sección de personalizados el botón "+" siempre va primero, así que el ícono en uso queda segundo
+		const addCell = grid.querySelector(".rb-icon-cell-add") as HTMLElement | null;
+		if (addCell && addCell.parentElement === grid) {
+			addCell.insertAdjacentElement("afterend", target);
+		} else if (grid.firstElementChild !== target) {
 			grid.prepend(target);
 		}
 	}
@@ -491,6 +505,12 @@ export class BookmarkItemModal extends Modal {
 				this.render();
 			};
 		}
+
+		// El botón "+" siempre va primero; el ícono en uso queda justo después
+		const selected = grid.querySelector(".rb-icon-cell.is-selected") as HTMLElement | null;
+		if (selected) {
+			addCell.insertAdjacentElement("afterend", selected);
+		}
 	}
 
 	private renderLucideIconsTab(container: HTMLElement): void {
@@ -507,7 +527,9 @@ export class BookmarkItemModal extends Modal {
 
 		// Ícono de Lucide que el ítem está usando actualmente (si lo hay)
 		const getCurrentIcon = (): string =>
-			this.draft.iconSource !== "custom-svg" && this.draft.lucideIcon ? this.draft.lucideIcon : "";
+			(this.draft.iconSource === "lucide" || this.draft.iconSource === "auto") && this.draft.lucideIcon
+				? this.draft.lucideIcon
+				: "";
 
 		const renderGrid = (query: string) => {
 			grid.empty();
@@ -561,9 +583,51 @@ export class BookmarkItemModal extends Modal {
 
 		const grid = container.createDiv({ cls: "rb-icon-grid" });
 
+		const isCurrentOnline = (key: string, svg: string): boolean =>
+			this.draft.iconSource === "online" &&
+			(this.draft.onlineIconKey === key || this.draft.customSvg === svg);
+
+		const applyOnlineIcon = (key: string, svg: string) => {
+			this.iconTouchedByUser = true;
+			this.draft.iconSource = "online";
+			this.draft.onlineIconKey = key;
+			this.draft.customSvg = svg;
+			this.updateIconPreview();
+			void this.onSaveOnlineIconCb({ key, svg });
+			grid.querySelectorAll(".rb-icon-cell").forEach((c) => c.removeClass("is-selected"));
+		};
+
+		// Sin búsqueda: se muestran los íconos que ya se usaron desde internet
+		const renderSaved = () => {
+			grid.empty();
+			const saved = [...this.savedOnlineIcons];
+			const currentKey = this.draft.onlineIconKey;
+			const currentSvg = this.draft.customSvg;
+			if (this.draft.iconSource === "online" && currentKey && currentSvg && !saved.some((s) => s.key === currentKey)) {
+				saved.unshift({ key: currentKey, svg: currentSvg });
+			}
+			for (const entry of saved) {
+				const cell = grid.createDiv({
+					cls: "rb-icon-cell" + (isCurrentOnline(entry.key, entry.svg) ? " is-selected" : ""),
+					attr: { "aria-label": entry.key },
+				});
+				const svgBox = cell.createDiv({ cls: "rb-icon-cell-svg" });
+				const tempId = `rb-net-${entry.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+				addIcon(tempId, entry.svg);
+				setIcon(svgBox, tempId);
+				cell.onclick = () => {
+					applyOnlineIcon(entry.key, entry.svg);
+					cell.addClass("is-selected");
+				};
+			}
+		};
+
 		const runSearch = async () => {
 			const q = input.value.trim();
-			if (!q) return;
+			if (!q) {
+				renderSaved();
+				return;
+			}
 			grid.empty();
 			const icons = await searchOnlineMonochromeIcons(q, 96);
 			for (const iconKey of icons) {
@@ -577,12 +641,9 @@ export class BookmarkItemModal extends Modal {
 						const tempId = `rb-net-${iconKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 						addIcon(tempId, svg);
 						setIcon(svgBox, tempId);
+						if (isCurrentOnline(iconKey, svg)) cell.addClass("is-selected");
 						cell.onclick = () => {
-							this.iconTouchedByUser = true;
-							this.draft.iconSource = "custom-svg";
-							this.draft.customSvg = svg;
-							this.updateIconPreview();
-							grid.querySelectorAll(".rb-icon-cell").forEach((c) => c.removeClass("is-selected"));
+							applyOnlineIcon(iconKey, svg);
 							cell.addClass("is-selected");
 						};
 					} else {
@@ -592,11 +653,19 @@ export class BookmarkItemModal extends Modal {
 			}
 		};
 
+		// Estado inicial de la pestaña
+		renderSaved();
+
 		searchBtn.onclick = runSearch;
 		input.addEventListener("keydown", (e) => {
 			if (e.key === "Enter") {
 				e.preventDefault();
 				runSearch();
+			}
+		});
+		input.addEventListener("input", () => {
+			if (input.value.trim() === "") {
+				renderSaved();
 			}
 		});
 	}
