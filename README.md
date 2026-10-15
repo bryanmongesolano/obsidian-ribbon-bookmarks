@@ -1,6 +1,6 @@
 [![Downloads](https://img.shields.io/github/downloads/bryanmongesolano/obsidian-ribbon-bookmarks/total?style=for-the-badge&logo=obsidian&color=7c3aed)](https://community.obsidian.md/plugins/ribbon-bookmarks)
 [![Release](https://img.shields.io/github/v/release/bryanmongesolano/obsidian-ribbon-bookmarks?style=for-the-badge)](https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks/releases)
-[![License](https://img.shields.io/github/license/bryanmongesolano/obsidian-ribbon-bookmarks?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-7c3aed?style=for-the-badge)](LICENSE)
 [![Review](https://img.shields.io/badge/review-passed-22c55e?style=for-the-badge)](https://community.obsidian.md/plugins/ribbon-bookmarks)
 
 # Ribbon Bookmarks
