@@ -54,20 +54,37 @@ export const BUILTIN_BRAND_SVGS: Record<string, { label: string; viewBox: string
 	},
 };
 
+const BUILTIN_WRAPPED_CACHE: Record<string, string> = {};
+for (const [k, v] of Object.entries(BUILTIN_BRAND_SVGS)) {
+	BUILTIN_WRAPPED_CACHE[k] = `<svg viewBox="${v.viewBox}" width="100" height="100">${v.body}</svg>`;
+}
+
+/** Caché en memoria de íconos ya registrados en Obsidian para evitar llamadas redundantes a addIcon. */
+const registeredIconCache = new Map<string, string>();
+
+/** Caché en memoria de SVGs descargados desde Iconify. */
+const iconifySvgCache = new Map<string, string>();
+
+let cachedLucideIcons: string[] | null = null;
+let lastRawIconCount = -1;
+
+export function registerIconOnce(iconId: string, svgContent: string): void {
+	if (registeredIconCache.get(iconId) === svgContent) return;
+	addIcon(iconId, svgContent);
+	registeredIconCache.set(iconId, svgContent);
+}
+
 export function wrapSvgForObsidian(viewBox: string, innerBody: string): string {
 	return `<svg viewBox="${viewBox}" width="100" height="100">${innerBody}</svg>`;
 }
 
 export function getBuiltinBrandSvg(key: string): string | null {
-	const entry = BUILTIN_BRAND_SVGS[key];
-	if (!entry) return null;
-	return wrapSvgForObsidian(entry.viewBox, entry.body);
+	return BUILTIN_WRAPPED_CACHE[key] ?? null;
 }
 
 /**
  * Interpreta una URL escrita a medias: si no tiene esquema se le agrega https://
- * y al comparar se ignoran mayúsculas, "www." y el esquema. Así la detección del
- * ícono funciona mientras se escribe y da igual si es http o https.
+ * y al comparar se ignoran mayúsculas, "www." y el esquema.
  */
 export function parseUrlLoose(raw: string): URL | null {
 	const trimmed = (raw || "").trim();
@@ -91,34 +108,34 @@ export function detectKnownUrlIcon(urlStr: string): { customSvg?: string; lucide
 	const full = (host + u.pathname).toLowerCase();
 
 	if (host === "docs.new" || full.includes("docs.google.com/document")) {
-		return { customSvg: getBuiltinBrandSvg("google-docs") ?? undefined, lucideIcon: "file" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["google-docs"], lucideIcon: "file" };
 	}
 	if (host === "sheets.new" || full.includes("docs.google.com/spreadsheets")) {
-		return { customSvg: getBuiltinBrandSvg("google-sheets") ?? undefined, lucideIcon: "sheet" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["google-sheets"], lucideIcon: "sheet" };
 	}
 	if (host === "slides.new" || full.includes("docs.google.com/presentation")) {
-		return { customSvg: getBuiltinBrandSvg("google-slides") ?? undefined, lucideIcon: "presentation" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["google-slides"], lucideIcon: "presentation" };
 	}
 	if (host.includes("drive.google.com")) {
-		return { customSvg: getBuiltinBrandSvg("google-drive") ?? undefined, lucideIcon: "cloud" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["google-drive"], lucideIcon: "cloud" };
 	}
 	if (host.includes("gemini.google.com")) {
-		return { customSvg: getBuiltinBrandSvg("google-gemini") ?? undefined, lucideIcon: "sparkle" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["google-gemini"], lucideIcon: "sparkle" };
 	}
 	if (host.includes("notebooklm.google.com")) {
-		return { customSvg: getBuiltinBrandSvg("notebooklm") ?? undefined, lucideIcon: "book-a" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["notebooklm"], lucideIcon: "book-a" };
 	}
 	if (host.includes("moodle")) {
-		return { customSvg: getBuiltinBrandSvg("moodle") ?? undefined, lucideIcon: "school" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["moodle"], lucideIcon: "school" };
 	}
 	if (host.includes("github.com")) {
-		return { customSvg: getBuiltinBrandSvg("github") ?? undefined, lucideIcon: "github" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["github"], lucideIcon: "github" };
 	}
 	if (host.includes("youtube.com") || host.includes("youtu.be")) {
-		return { customSvg: getBuiltinBrandSvg("youtube") ?? undefined, lucideIcon: "video" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["youtube"], lucideIcon: "video" };
 	}
 	if (host === "www.google.com" || host === "google.com") {
-		return { customSvg: getBuiltinBrandSvg("google") ?? undefined, lucideIcon: "globe" };
+		return { customSvg: BUILTIN_WRAPPED_CACHE["google"], lucideIcon: "globe" };
 	}
 
 	return {};
@@ -127,8 +144,8 @@ export function detectKnownUrlIcon(urlStr: string): { customSvg?: string; lucide
 export function getLucideIconForFilePath(filePath: string): string {
 	const lower = (filePath || "").toLowerCase().trim();
 	if (lower.endsWith(".excalidraw.md") || lower.endsWith(".excalidraw")) return "pen-tool";
-	const extMatch = /\.([a-z0-9]+)$/.exec(lower);
-	const ext = extMatch ? extMatch[1] : "";
+	const dotIdx = lower.lastIndexOf(".");
+	const ext = dotIdx !== -1 ? lower.slice(dotIdx + 1) : "";
 
 	switch (ext) {
 		case "md":
@@ -239,7 +256,9 @@ export function sanitizeAndMonochromizeSvg(rawSvg: string): string | null {
 			if (st && st.toLowerCase() !== "none" && st.toLowerCase() !== "transparent") {
 				usesStroke = true;
 			}
-			Array.from(el.children).forEach(checkStroke);
+			for (let i = 0; i < el.children.length; i++) {
+				checkStroke(el.children[i]);
+			}
 		};
 		checkStroke(svgEl);
 
@@ -270,7 +289,9 @@ export function sanitizeAndMonochromizeSvg(rawSvg: string): string | null {
 					.replace(/stroke\s*:\s*(?!none|transparent)[^;]+/gi, "stroke:currentColor");
 				el.setAttribute("style", cleaned);
 			}
-			Array.from(el.children).forEach((child) => processElement(child, false));
+			for (let i = 0; i < el.children.length; i++) {
+				processElement(el.children[i], false);
+			}
 		};
 
 		processElement(svgEl, true);
@@ -289,11 +310,6 @@ export function sanitizeAndMonochromizeSvg(rawSvg: string): string | null {
 	}
 }
 
-/**
- * Busca en todas las colecciones vectoriales monocromáticas de Iconify (más de 150 librerías:
- * Lucide, Simple Icons, Tabler, Material Design, Phosphor, Remix, Solar, HugeIcons, Bootstrap,
- * FontAwesome, Ionicons, Octicons, Carbon, Iconoir, BoxIcons, etc.) hasta 96 resultados.
- */
 export async function searchOnlineMonochromeIcons(query: string, limit = 96): Promise<string[]> {
 	const q = query.trim();
 	if (!q) return [];
@@ -310,13 +326,22 @@ export async function searchOnlineMonochromeIcons(query: string, limit = 96): Pr
 }
 
 export async function fetchIconifySvg(iconId: string): Promise<string | null> {
+	const cached = iconifySvgCache.get(iconId);
+	if (cached) return cached;
 	try {
-		const [prefix, name] = iconId.split(":");
+		const colonIdx = iconId.indexOf(":");
+		if (colonIdx <= 0) return null;
+		const prefix = iconId.slice(0, colonIdx);
+		const name = iconId.slice(colonIdx + 1);
 		if (!prefix || !name) return null;
 		const url = `https://api.iconify.design/${encodeURIComponent(prefix)}/${encodeURIComponent(name)}.svg`;
 		const res = await requestUrl({ url, method: "GET" });
 		if (res.status === 200 && res.text) {
-			return sanitizeAndMonochromizeSvg(res.text);
+			const clean = sanitizeAndMonochromizeSvg(res.text);
+			if (clean) {
+				iconifySvgCache.set(iconId, clean);
+				return clean;
+			}
 		}
 	} catch {
 		// Ignorar
@@ -360,7 +385,7 @@ export function getOrRegisterItemIconId(item: RibbonBookmarkItem): string {
 	}
 	if ((item.iconSource === "custom-svg" || item.iconSource === "online") && item.customSvg) {
 		const customId = `rb-custom-icon-${item.id}`;
-		addIcon(customId, item.customSvg);
+		registerIconOnce(customId, item.customSvg);
 		return customId;
 	}
 	if (item.iconSource === "lucide" && item.lucideIcon) {
@@ -376,7 +401,7 @@ export function getOrRegisterItemIconId(item: RibbonBookmarkItem): string {
 		const known = detectKnownUrlIcon(item.url);
 		if (known.customSvg) {
 			const customId = `rb-auto-icon-${item.id}`;
-			addIcon(customId, known.customSvg);
+			registerIconOnce(customId, known.customSvg);
 			return customId;
 		}
 		if (known.lucideIcon) {
@@ -387,7 +412,25 @@ export function getOrRegisterItemIconId(item: RibbonBookmarkItem): string {
 }
 
 export function getAllObsidianLucideIcons(): string[] {
-	return getIconIds()
-		.filter((id) => !id.startsWith("rb-custom-icon-") && !id.startsWith("rb-auto-icon-"))
-		.map((id) => (id.startsWith("lucide-") ? id.slice(7) : id));
+	const rawIds = getIconIds();
+	if (cachedLucideIcons && rawIds.length === lastRawIconCount) {
+		return cachedLucideIcons;
+	}
+	const result: string[] = [];
+	for (let i = 0; i < rawIds.length; i++) {
+		const id = rawIds[i];
+		if (
+			id.startsWith("rb-custom-icon-") ||
+			id.startsWith("rb-auto-icon-") ||
+			id.startsWith("rb-saved-custom-") ||
+			id.startsWith("rb-brand-") ||
+			id.startsWith("rb-net-")
+		) {
+			continue;
+		}
+		result.push(id.startsWith("lucide-") ? id.slice(7) : id);
+	}
+	cachedLucideIcons = result;
+	lastRawIconCount = rawIds.length;
+	return result;
 }

@@ -314,6 +314,12 @@ body.rb-is-dragging .tooltip {
 	cursor: pointer;
 	color: var(--icon-color);
 	transition: background-color 120ms ease, border-color 120ms ease;
+	content-visibility: auto;
+	contain-intrinsic-size: 38px;
+}
+
+.rb-icon-cell[hidden] {
+	display: none !important;
 }
 
 .rb-icon-cell:hover {

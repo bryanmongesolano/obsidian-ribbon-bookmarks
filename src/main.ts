@@ -14,7 +14,7 @@ import {
 	setIcon,
 	setTooltip,
 } from "obsidian";
-import { BrowserAdapter, detectBrowser, normalizeUrl } from "./browser";
+import { BrowserAdapter, detectBrowser } from "./browser";
 import { getLucideIconForFilePath, getOrRegisterItemIconId, resolveAutoIconForUrl } from "./icons";
 import { TFn, LangSetting, createTranslator, resolveLang } from "./i18n";
 import { BookmarkItemModal } from "./modals";
@@ -62,13 +62,15 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	private activeDraggedLeaf: WorkspaceLeaf | null = null;
 	private cleanupListeners: Array<() => void> = [];
 	private dropBarEl: HTMLElement | null = null;
+	private highlightedDropEl: HTMLElement | null = null;
 	private openPopups: OpenFolderPopup[] = [];
+	private openFolderZoneBounds: { left: number; top: number; right: number; bottom: number } | null = null;
+	private detachPopupWatchers: (() => void) | null = null;
 	private hoverExpandTimer: number | null = null;
 	private hoverExpandTargetId: string | null = null;
 	private hasOpenContextMenu = false;
 	private suppressClickUntil = 0;
 	private bypassNextRibbonContextMenu = false;
-	private recordKeyUsed: string[] = [];
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -78,7 +80,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			this.renderRibbonItems();
 			this.setupRibbonContextMenuAndDragDrop();
 			this.setupTabHeaderDragTracking();
-			this.setupGlobalPointerWatchers();
 		});
 		this.addSettingTab(new RibbonBookmarksSettingTab(this.app, this));
 	}
@@ -131,11 +132,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	/**
-	 * Normaliza recursivamente las carpetas:
-	 * - Carpeta con 0 elementos -> se elimina sola.
-	 * - Carpeta con 1 solo elemento -> se deshace y el elemento sube a su posición.
-	 */
 	private normalizeFolderTree(list: RibbonBookmarkItem[]): RibbonBookmarkItem[] {
 		const result: RibbonBookmarkItem[] = [];
 		for (const item of list) {
@@ -160,7 +156,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	/** Guarda un ícono obtenido de la búsqueda en internet para poder reutilizarlo. */
 	private async saveOnlineIcon(icon: SavedOnlineIcon): Promise<void> {
 		const idx = this.settings.savedOnlineIcons.findIndex((s) => s.key === icon.key);
 		if (idx !== -1) {
@@ -194,7 +189,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		for (const item of this.settings.items) {
 			const iconId = getOrRegisterItemIconId(item);
 			const uniqueKey = `rb-item-${item.id}`;
-			this.recordKeyUsed.push(uniqueKey);
 
 			const el = this.addRibbonIcon(iconId, uniqueKey, (evt: MouseEvent) => {
 				if (evt.button !== 0 || evt.ctrlKey) return;
@@ -243,18 +237,31 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		const container = ribbon?.ribbonItemsEl;
 		if (!container || !ribbon?.items) return;
 
+		const ourSet = new Set<HTMLElement>();
 		for (const item of this.settings.items) {
 			const el = this.renderedEls.get(item.id);
-			if (el) container.appendChild(el);
+			if (el) {
+				container.appendChild(el);
+				ourSet.add(el);
+			}
 		}
 
-		const ours = this.settings.items
-			.map((i) => this.renderedEls.get(i.id))
-			.filter((el): el is HTMLElement => Boolean(el));
-		const others = ribbon.items.filter((x) => !x.buttonEl || !ours.includes(x.buttonEl));
-		const ourEntries = ours
-			.map((el) => ribbon.items!.find((x) => x.buttonEl === el))
-			.filter((x): x is NonNullable<typeof x> => Boolean(x));
+		const byButtonEl = new Map<HTMLElement, (typeof ribbon.items)[number]>();
+		const others: typeof ribbon.items = [];
+		for (let i = 0; i < ribbon.items.length; i++) {
+			const entry = ribbon.items[i];
+			if (entry.buttonEl && ourSet.has(entry.buttonEl)) {
+				byButtonEl.set(entry.buttonEl, entry);
+			} else {
+				others.push(entry);
+			}
+		}
+
+		const ourEntries: typeof ribbon.items = [];
+		for (const el of ourSet) {
+			const found = byButtonEl.get(el);
+			if (found) ourEntries.push(found);
+		}
 		ribbon.items.splice(0, ribbon.items.length, ...others, ...ourEntries);
 	}
 
@@ -293,11 +300,13 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 		if (item.type === "url" && item.url) {
 			let targetUrl = item.url;
-			const selectionRegex = /{{\s*selection\s*}}/g;
-			if (selectionRegex.test(targetUrl)) {
-				const activeMd = this.app.workspace.getActiveViewOfType(MarkdownView);
-				const sel = activeMd?.editor?.getSelection()?.trim() || "";
-				targetUrl = targetUrl.replace(selectionRegex, encodeURIComponent(sel));
+			if (targetUrl.includes("{{")) {
+				const selectionRegex = /{{\s*selection\s*}}/g;
+				if (selectionRegex.test(targetUrl)) {
+					const activeMd = this.app.workspace.getActiveViewOfType(MarkdownView);
+					const sel = activeMd?.editor?.getSelection()?.trim() || "";
+					targetUrl = targetUrl.replace(selectionRegex, encodeURIComponent(sel));
+				}
 			}
 
 			const browser = this.browser;
@@ -374,18 +383,19 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	/* ==========================================================================
-	   Popups de carpetas (soporta anidación, toggle, cascada y zona de hover)
+	   Popups de carpetas (con listeners bajo demanda y límites en caché)
 	   ========================================================================== */
 
-	private setupGlobalPointerWatchers(): void {
+	private ensurePopupWatchersAttached(): void {
+		if (this.detachPopupWatchers) return;
+
 		const onPointerDown = (evt: MouseEvent) => {
-			if (this.openPopups.length === 0) return;
-			if (this.hasOpenContextMenu) return;
+			if (this.openPopups.length === 0 || this.hasOpenContextMenu) return;
 			const target = evt.target as HTMLElement | null;
 			if (!target) return;
-			if (target.closest(".rb-folder-popup")) return;
-			if (target.closest(".menu")) return;
-			if (target.closest(".modal-container")) return;
+			if (target.closest(".rb-folder-popup") || target.closest(".menu") || target.closest(".modal-container")) {
+				return;
+			}
 			const ribbonBtn = target.closest(".rb-ribbon-folder") as HTMLElement | null;
 			if (ribbonBtn && evt.button === 0 && ribbonBtn.getAttribute("data-rb-id") === this.openPopups[0]?.folder.id) {
 				return;
@@ -394,10 +404,9 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		};
 
 		const onPointerMove = (evt: MouseEvent) => {
-			if (this.openPopups.length === 0) return;
-			if (this.hasOpenContextMenu) return;
-			if (document.querySelector(".modal-container")) return;
+			if (this.openPopups.length === 0 || this.hasOpenContextMenu) return;
 			if (this.isPointerInOpenFolderZone(evt.clientX, evt.clientY)) return;
+			if (document.querySelector(".modal-container")) return;
 			this.closeAllFolderPopups();
 		};
 
@@ -410,49 +419,65 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		window.addEventListener("mousedown", onPointerDown, true);
 		window.addEventListener("mousemove", onPointerMove, true);
 		window.addEventListener("keydown", onKeyDown, true);
-		this.cleanupListeners.push(() => {
+
+		this.detachPopupWatchers = () => {
 			window.removeEventListener("mousedown", onPointerDown, true);
 			window.removeEventListener("mousemove", onPointerMove, true);
 			window.removeEventListener("keydown", onKeyDown, true);
-		});
+			this.detachPopupWatchers = null;
+		};
 	}
 
-	/**
-	 * Verdadero si el puntero está sobre la carpeta abierta, sobre su contenido o sobre el
-	 * espacio intermedio entre ambos (con ~40px de tolerancia). Así la carpeta no se cierra
-	 * mientras el usuario intenta seleccionar o arrastrar algo hacia dentro.
-	 */
-	private isPointerInOpenFolderZone(x: number, y: number): boolean {
-		if (this.openPopups.length === 0) return false;
-
-		const rects: DOMRect[] = [];
-		for (const popup of this.openPopups) {
-			rects.push(popup.el.getBoundingClientRect());
-			rects.push(popup.anchorEl.getBoundingClientRect());
+	private recomputeOpenFolderZoneBounds(): void {
+		if (this.openPopups.length === 0) {
+			this.openFolderZoneBounds = null;
+			return;
 		}
-		const topLevel = this.openPopups[0];
-		const topEl = this.renderedEls.get(topLevel.folder.id);
-		if (topEl) rects.push(topEl.getBoundingClientRect());
-
 		let left = Infinity;
 		let top = Infinity;
 		let right = -Infinity;
 		let bottom = -Infinity;
-		for (const r of rects) {
-			left = Math.min(left, r.left);
-			top = Math.min(top, r.top);
-			right = Math.max(right, r.right);
-			bottom = Math.max(bottom, r.bottom);
+
+		const includeRect = (r: DOMRect) => {
+			if (r.left < left) left = r.left;
+			if (r.top < top) top = r.top;
+			if (r.right > right) right = r.right;
+			if (r.bottom > bottom) bottom = r.bottom;
+		};
+
+		for (let i = 0; i < this.openPopups.length; i++) {
+			const popup = this.openPopups[i];
+			includeRect(popup.el.getBoundingClientRect());
+			includeRect(popup.anchorEl.getBoundingClientRect());
 		}
+		const topEl = this.renderedEls.get(this.openPopups[0].folder.id);
+		if (topEl) includeRect(topEl.getBoundingClientRect());
 
 		const tol = 40;
-		return x >= left - tol && x <= right + tol && y >= top - tol && y <= bottom + tol;
+		this.openFolderZoneBounds = {
+			left: left - tol,
+			top: top - tol,
+			right: right + tol,
+			bottom: bottom + tol,
+		};
+	}
+
+	private isPointerInOpenFolderZone(x: number, y: number): boolean {
+		const b = this.openFolderZoneBounds;
+		if (!b) return false;
+		return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
 	}
 
 	public closeFolderPopupsFromLevel(level: number): void {
 		while (this.openPopups.length > level) {
 			const popped = this.openPopups.pop();
 			popped?.el.remove();
+		}
+		if (this.openPopups.length === 0) {
+			this.openFolderZoneBounds = null;
+			this.detachPopupWatchers?.();
+		} else {
+			this.recomputeOpenFolderZoneBounds();
 		}
 	}
 
@@ -505,7 +530,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	private findItemByIdRecursive(list: RibbonBookmarkItem[], id: string): RibbonBookmarkItem | null {
-		for (const item of list) {
+		for (let i = 0; i < list.length; i++) {
+			const item = list[i];
 			if (item.id === id) return item;
 			if (item.children) {
 				const found = this.findItemByIdRecursive(item.children, id);
@@ -517,6 +543,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 	private openFolderPopupAtLevel(folder: RibbonBookmarkItem, anchorEl: HTMLElement, level: number): void {
 		this.closeFolderPopupsFromLevel(level);
+		this.ensurePopupWatchersAttached();
 
 		const popupEl = document.body.createDiv({ cls: "menu rb-folder-popup" });
 		const scrollEl = popupEl.createDiv({ cls: "menu-scroll" });
@@ -524,7 +551,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		const children = folder.children || [];
 		folder.children = children;
 
-		for (const child of children) {
+		for (let i = 0; i < children.length; i++) {
+			const child = children[i];
 			if (child.type === "separator") {
 				scrollEl.createDiv({ cls: "menu-separator" });
 				continue;
@@ -601,6 +629,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		if (popupRect.bottom > window.innerHeight - 8) {
 			popupEl.style.top = `${Math.max(8, Math.round(window.innerHeight - popupRect.height - 8))}px`;
 		}
+
+		this.recomputeOpenFolderZoneBounds();
 	}
 
 	/* ==========================================================================
@@ -668,10 +698,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		menu.showAtMouseEvent(evt);
 	}
 
-	/**
-	 * Captura el menú que genera el componente nativo del Ribbon (leftRibbon.onContextMenu)
-	 * sin hardcodear ninguno de sus elementos, para insertarlos en un submenú desplegable.
-	 */
 	private captureNativeRibbonMenu(evt: MouseEvent): Menu | null {
 		const ribbon = this.leftRibbon;
 		if (!ribbon?.containerEl || typeof ribbon.onContextMenu !== "function") return null;
@@ -702,7 +728,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		if (!container) return;
 
 		const onRibbonContextMenu = (evt: MouseEvent) => {
-			// Cuando el usuario elige "Opciones de barra", dejamos pasar el clic al componente nativo
 			if (this.bypassNextRibbonContextMenu) {
 				this.bypassNextRibbonContextMenu = false;
 				this.closeAllFolderPopups();
@@ -724,7 +749,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				  ) as MenuItem[])
 				: [];
 
-			// Renombrar los ítems nativos que corresponden a nuestros propios marcadores
 			for (const natItem of nativeItems) {
 				const titleEl = (natItem as unknown as { titleEl?: HTMLElement }).titleEl;
 				const text = titleEl?.getText?.() || "";
@@ -764,7 +788,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			menu.addSeparator();
 
 			if (nativeItems.length > 0) {
-				// Submenú con las opciones nativas reales (dinámicas, sin hardcodear)
 				menu.addItem((mi) => {
 					mi.setTitle(this.t("ribbonBarOptions")).setIcon("sliders-horizontal");
 					const sub = (mi as unknown as { setSubmenu?: () => Menu }).setSubmenu?.();
@@ -789,7 +812,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					}
 				});
 			} else {
-				// Respaldo: reenviar el clic derecho al componente nativo para que muestre sus opciones
 				menu.addItem((mi) =>
 					mi
 						.setTitle(this.t("ribbonBarOptions"))
@@ -817,8 +839,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		const isPointInDropZone = (x: number, y: number): boolean => {
 			const rRect = container.getBoundingClientRect();
 			if (x >= rRect.left - 8 && x <= rRect.right + 8 && y >= rRect.top && y <= rRect.bottom) return true;
-			for (const popup of this.openPopups) {
-				const pRect = popup.el.getBoundingClientRect();
+			for (let i = 0; i < this.openPopups.length; i++) {
+				const pRect = this.openPopups[i].el.getBoundingClientRect();
 				if (x >= pRect.left - 8 && x <= pRect.right + 8 && y >= pRect.top - 8 && y <= pRect.bottom + 8) {
 					return true;
 				}
@@ -828,7 +850,9 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 		const onGlobalDragOver = (evt: DragEvent) => {
 			if (!isPointInDropZone(evt.clientX, evt.clientY)) {
-				this.setDraggingMode(false);
+				if (document.body.hasClass("rb-is-dragging")) {
+					this.setDraggingMode(false);
+				}
 				return;
 			}
 			evt.preventDefault();
@@ -920,20 +944,30 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 	private setDraggingMode(active: boolean): void {
 		if (active) {
-			document.body.addClass("rb-is-dragging");
+			if (!document.body.hasClass("rb-is-dragging")) {
+				document.body.addClass("rb-is-dragging");
+				document.querySelectorAll(".tooltip").forEach((t) => t.remove());
+			}
 		} else {
 			document.body.removeClass("rb-is-dragging");
 			this.clearHoverExpandTimer();
 			this.hidePurpleDropLine();
-			this.clearAllDropHighlights();
+			this.clearDropHighlight();
 		}
 	}
 
-	private clearAllDropHighlights(): void {
-		for (const node of this.renderedEls.values()) node.removeClass("rb-drop-inside");
-		for (const popup of this.openPopups) {
-			for (const row of popup.rowEls.values()) row.removeClass("rb-drop-inside");
+	private clearDropHighlight(): void {
+		if (this.highlightedDropEl) {
+			this.highlightedDropEl.removeClass("rb-drop-inside");
+			this.highlightedDropEl = null;
 		}
+	}
+
+	private setDropHighlight(el: HTMLElement): void {
+		if (this.highlightedDropEl === el) return;
+		this.clearDropHighlight();
+		el.addClass("rb-drop-inside");
+		this.highlightedDropEl = el;
 	}
 
 	private computeDropLineY(targetEl: HTMLElement, side: "above" | "below"): number {
@@ -959,7 +993,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				clientY <= pRect.bottom + 8
 			) {
 				const children = popup.folder.children || [];
-				for (const child of children) {
+				for (let i = 0; i < children.length; i++) {
+					const child = children[i];
 					if (excludeId && child.id === excludeId) continue;
 					const rowEl = popup.rowEls.get(child.id);
 					if (!rowEl) continue;
@@ -984,7 +1019,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			}
 		}
 
-		for (const item of this.settings.items) {
+		for (let i = 0; i < this.settings.items.length; i++) {
+			const item = this.settings.items[i];
 			if (excludeId && item.id === excludeId) continue;
 			const el = this.renderedEls.get(item.id);
 			if (!el) continue;
@@ -1016,10 +1052,9 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	private updateDragVisualFeedback(hit: DropHitTarget | null, sourceItem?: RibbonBookmarkItem): void {
-		this.hidePurpleDropLine();
-		this.clearAllDropHighlights();
-
 		if (!hit) {
+			this.hidePurpleDropLine();
+			this.clearDropHighlight();
 			this.clearHoverExpandTimer();
 			return;
 		}
@@ -1028,7 +1063,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			hit.zone === "inside" && hit.targetItem.type !== "separator" && (!sourceItem || sourceItem.type !== "separator");
 
 		if (canGroup) {
-			hit.targetEl.addClass("rb-drop-inside");
+			this.hidePurpleDropLine();
+			this.setDropHighlight(hit.targetEl);
 			if (hit.targetItem.type === "folder") {
 				this.scheduleHoverFolderExpand(hit.targetItem, hit.targetEl, hit.popupLevel + 1);
 			} else {
@@ -1037,6 +1073,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			return;
 		}
 
+		this.clearDropHighlight();
 		this.clearHoverExpandTimer();
 		const side = hit.zone === "above" ? "above" : "below";
 		const lineY = this.computeDropLineY(hit.targetEl, side);
@@ -1102,7 +1139,6 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 				if (!isDragging) return;
 
-				// Evita que el clic de soltar se interprete como clic simple y abra el elemento
 				this.suppressUpcomingClick();
 				this.setDraggingMode(false);
 				upEvt.preventDefault();

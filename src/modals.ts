@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, TFile, addIcon, setIcon, setTooltip } from "obsidian";
+import { App, Modal, Notice, Setting, TFile, setIcon, setTooltip } from "obsidian";
 import {
 	BUILTIN_BRAND_SVGS,
 	detectKnownUrlIcon,
@@ -8,6 +8,7 @@ import {
 	getLucideIconForFilePath,
 	getOrRegisterItemIconId,
 	parseUrlLoose,
+	registerIconOnce,
 	resolveAutoIconForUrl,
 	sanitizeAndMonochromizeSvg,
 	searchOnlineMonochromeIcons,
@@ -44,6 +45,10 @@ export class BookmarkItemModal extends Modal {
 	/** Si el usuario eligió el ícono a mano, se deja de autodetectar por URL o ruta */
 	private iconTouchedByUser = false;
 	private autoDetectTimer: number | null = null;
+	private gridObserver: IntersectionObserver | null = null;
+	private cellByLabel: Map<string, HTMLElement> = new Map();
+	private selectedCellEl: HTMLElement | null = null;
+	private cachedVaultFiles: Array<{ file: TFile; lowerPath: string }> | null = null;
 
 	constructor(opts: BookmarkModalOptions) {
 		super(opts.app);
@@ -70,7 +75,6 @@ export class BookmarkItemModal extends Modal {
 			};
 		}
 
-		// Si el ícono vino de la búsqueda en internet, se abre directamente esa pestaña
 		this.activeIconTab = this.draft.iconSource === "online" ? "internet" : "icons";
 	}
 
@@ -84,7 +88,18 @@ export class BookmarkItemModal extends Modal {
 			window.clearTimeout(this.autoDetectTimer);
 			this.autoDetectTimer = null;
 		}
+		this.disconnectGridObserver();
+		this.cellByLabel.clear();
+		this.selectedCellEl = null;
+		this.cachedVaultFiles = null;
 		this.contentEl.empty();
+	}
+
+	private disconnectGridObserver(): void {
+		if (this.gridObserver) {
+			this.gridObserver.disconnect();
+			this.gridObserver = null;
+		}
 	}
 
 	private createSettingWithHelp(container: HTMLElement, nameText: string, helpTooltip: string): Setting {
@@ -109,6 +124,7 @@ export class BookmarkItemModal extends Modal {
 
 	private render(): void {
 		const { contentEl } = this;
+		this.disconnectGridObserver();
 		contentEl.empty();
 
 		const isFolder = this.draft.type === "folder";
@@ -122,7 +138,6 @@ export class BookmarkItemModal extends Modal {
 
 		this.setTitle(title);
 
-		// Nombre (siempre visible; al modificar es solo un alias)
 		const nameSetting = this.createSettingWithHelp(contentEl, this.t("fieldName"), this.t("helpName"));
 		nameSetting.addText((text) => {
 			text.inputEl.addClass("rb-wide-input");
@@ -134,7 +149,6 @@ export class BookmarkItemModal extends Modal {
 				});
 		});
 
-		// Tipo de elemento: solo al crear. El campo de valor se muestra siempre
 		if (!isFolder) {
 			if (this.isNew) {
 				this.createSettingWithHelp(contentEl, this.t("fieldType"), this.t("helpType")).addDropdown((dd) => {
@@ -152,7 +166,6 @@ export class BookmarkItemModal extends Modal {
 			}
 
 			if (this.draft.type === "url") {
-				// La URL siempre es editable, tanto al crear como al modificar
 				this.renderUrlFields(contentEl);
 			} else if (this.isNew && this.draft.type === "file") {
 				this.renderFileFields(contentEl);
@@ -177,12 +190,6 @@ export class BookmarkItemModal extends Modal {
 		});
 	}
 
-	/**
-	 * Al escribir o pegar una URL, el ícono se reconoce al instante usando el catálogo
-	 * local de marcas (independiente de http/https y de que la URL esté completa).
-	 * Solo si el sitio no está en el catálogo se intenta, tras una pausa breve, bajar
-	 * su logo vectorial desde internet.
-	 */
 	private scheduleAutoIconDetection(): void {
 		if (this.iconTouchedByUser) return;
 		const url = (this.draft.url || "").trim();
@@ -215,14 +222,12 @@ export class BookmarkItemModal extends Modal {
 		}, 500);
 	}
 
-	/** Verdadero cuando lo escrito ya parece un dominio completo (evita consultas mientras se escribe). */
 	private looksLikeCompleteDomain(raw: string): boolean {
 		const parsed = parseUrlLoose(raw);
 		if (!parsed) return false;
 		return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(parsed.hostname) && parsed.hostname.includes(".");
 	}
 
-	/** Aplica el ícono detectado, cambia a la pestaña correspondiente y lo marca. */
 	private applyDetectedIcon(
 		source: "custom-svg" | "lucide" | "online",
 		customSvg: string | undefined,
@@ -247,7 +252,6 @@ export class BookmarkItemModal extends Modal {
 		}
 	}
 
-	/** Reconstruye únicamente la sección de íconos, conservando el resto del modal y el foco. */
 	private rebuildIconSection(): void {
 		const wrapper = this.iconPickerWrapperEl;
 		const parent = wrapper?.parentElement;
@@ -261,47 +265,65 @@ export class BookmarkItemModal extends Modal {
 		}
 	}
 
-	/** Marca y trae al frente el ícono detectado sin reconstruir toda la grilla. */
+	private getCurrentTargetLabel(): string {
+		if (this.draft.iconSource === "custom-svg" && this.draft.customSvg) {
+			const saved = this.customIcons.find((s) => s.svg === this.draft.customSvg);
+			if (saved) return saved.label;
+			for (const key of Object.keys(BUILTIN_BRAND_SVGS)) {
+				if (getBuiltinBrandSvg(key) === this.draft.customSvg) {
+					return BUILTIN_BRAND_SVGS[key].label;
+				}
+			}
+			return "";
+		}
+		if (this.draft.iconSource === "online" && this.draft.onlineIconKey) {
+			return this.draft.onlineIconKey;
+		}
+		if ((this.draft.iconSource === "lucide" || this.draft.iconSource === "auto") && this.draft.lucideIcon) {
+			return this.draft.lucideIcon;
+		}
+		return "";
+	}
+
+	private selectAndPositionCell(target: HTMLElement | undefined, grid: HTMLElement): void {
+		if (this.selectedCellEl && this.selectedCellEl !== target) {
+			this.selectedCellEl.removeClass("is-selected");
+		}
+		this.selectedCellEl = target ?? null;
+		if (!target) return;
+
+		this.ensureCellIconRendered(target);
+		target.addClass("is-selected");
+
+		const addCell = grid.querySelector(".rb-icon-cell-add") as HTMLElement | null;
+		if (addCell && addCell.parentElement === grid) {
+			if (addCell.nextElementSibling !== target) {
+				addCell.insertAdjacentElement("afterend", target);
+			}
+		} else if (grid.firstElementChild !== target) {
+			grid.prepend(target);
+		}
+	}
+
+	private ensureCellIconRendered(cell: HTMLElement): void {
+		if (cell.getAttribute("data-rb-rendered") === "1") return;
+		const iconId = cell.getAttribute("data-rb-icon-id");
+		if (!iconId) return;
+		cell.setAttribute("data-rb-rendered", "1");
+		const iconSpan = cell.createDiv({ cls: "rb-icon-cell-svg" });
+		setIcon(iconSpan, iconId);
+	}
+
+	/** Marca y posiciona el ícono detectado en O(1) usando el índice cellByLabel. */
 	private markDetectedIconInPlace(): void {
 		const wrapper = this.iconPickerWrapperEl;
 		if (!wrapper) return;
 		const grid = wrapper.querySelector(".rb-icon-grid") as HTMLElement | null;
 		if (!grid) return;
 
-		grid.querySelectorAll(".rb-icon-cell.is-selected").forEach((c) => c.removeClass("is-selected"));
-
-		let label = "";
-		if (this.draft.iconSource === "custom-svg" && this.draft.customSvg) {
-			const saved = this.customIcons.find((s) => s.svg === this.draft.customSvg);
-			if (saved) {
-				label = saved.label;
-			} else {
-				for (const key of Object.keys(BUILTIN_BRAND_SVGS)) {
-					if (getBuiltinBrandSvg(key) === this.draft.customSvg) {
-						label = BUILTIN_BRAND_SVGS[key].label;
-						break;
-					}
-				}
-			}
-		} else if (this.draft.iconSource === "online" && this.draft.onlineIconKey) {
-			label = this.draft.onlineIconKey;
-		} else if (this.draft.lucideIcon) {
-			label = this.draft.lucideIcon;
-		}
-		if (!label) return;
-
-		const cells = Array.from(grid.querySelectorAll(".rb-icon-cell")) as HTMLElement[];
-		const target = cells.find((c) => c.getAttribute("aria-label") === label);
-		if (!target) return;
-		target.addClass("is-selected");
-
-		// En la sección de personalizados el botón "+" siempre va primero, así que el ícono en uso queda segundo
-		const addCell = grid.querySelector(".rb-icon-cell-add") as HTMLElement | null;
-		if (addCell && addCell.parentElement === grid) {
-			addCell.insertAdjacentElement("afterend", target);
-		} else if (grid.firstElementChild !== target) {
-			grid.prepend(target);
-		}
+		const label = this.getCurrentTargetLabel();
+		const target = label ? this.cellByLabel.get(label) : undefined;
+		this.selectAndPositionCell(target, grid);
 	}
 
 	private renderFileFields(container: HTMLElement): void {
@@ -323,7 +345,6 @@ export class BookmarkItemModal extends Modal {
 			}
 		};
 
-		// Resultados del Vault: se muestran unicamente mientras se escribe (nunca al pegar una ruta)
 		const resultsEl = container.createDiv({ cls: "rb-vault-file-results" });
 		resultsEl.hide();
 
@@ -335,7 +356,6 @@ export class BookmarkItemModal extends Modal {
 				.setValue(this.draft.filePath || "")
 				.onChange((val) => {
 					if (justPasted) {
-						// Al pegar una ruta no se abre el listado; solo se guarda la ruta y se precarga el ícono
 						justPasted = false;
 						resultsEl.hide();
 						resultsEl.empty();
@@ -401,11 +421,21 @@ export class BookmarkItemModal extends Modal {
 		query: string,
 		onChoose: (file: TFile) => void
 	): void {
+		if (!this.cachedVaultFiles) {
+			this.cachedVaultFiles = this.app.vault
+				.getFiles()
+				.map((file) => ({ file, lowerPath: file.path.toLowerCase() }));
+		}
+
 		const q = query.toLowerCase().trim();
-		const matches = this.app.vault
-			.getFiles()
-			.filter((f) => f.path.toLowerCase().includes(q))
-			.slice(0, 25);
+		const matches: TFile[] = [];
+		for (let i = 0; i < this.cachedVaultFiles.length; i++) {
+			const entry = this.cachedVaultFiles[i];
+			if (entry.lowerPath.includes(q)) {
+				matches.push(entry.file);
+				if (matches.length >= 25) break;
+			}
+		}
 
 		resultsEl.empty();
 		if (matches.length === 0) {
@@ -414,7 +444,8 @@ export class BookmarkItemModal extends Modal {
 		}
 		resultsEl.show();
 
-		for (const f of matches) {
+		for (let i = 0; i < matches.length; i++) {
+			const f = matches[i];
 			const row = resultsEl.createDiv({ cls: "rb-vault-file-row" });
 			const iconSpan = row.createSpan({ cls: "rb-vault-file-row-icon" });
 			setIcon(iconSpan, getLucideIconForFilePath(f.path));
@@ -424,6 +455,10 @@ export class BookmarkItemModal extends Modal {
 	}
 
 	private renderIconPickerSection(container: HTMLElement): void {
+		this.disconnectGridObserver();
+		this.cellByLabel.clear();
+		this.selectedCellEl = null;
+
 		const wrapper = container.createDiv({ cls: "rb-icon-picker-wrapper" });
 		wrapper.setAttribute("data-rb-tab", this.activeIconTab);
 		this.iconPickerWrapperEl = wrapper;
@@ -445,7 +480,7 @@ export class BookmarkItemModal extends Modal {
 			});
 			btn.onclick = () => {
 				this.activeIconTab = tab.id;
-				this.render();
+				this.rebuildIconSection();
 			};
 		}
 
@@ -458,7 +493,12 @@ export class BookmarkItemModal extends Modal {
 		}
 	}
 
-	/** Pestaña única de íconos: los cargados, las marcas integradas y toda la librería de Lucide. */
+	/**
+	 * Pestaña unificada de íconos:
+	 * - Usa IntersectionObserver para renderizar los SVGs de Lucide bajo demanda al hacer scroll.
+	 * - Filtra ocultando/mostrando nodos existentes (cell.hidden) sin destruir ni recrear el DOM.
+	 * - Usa delegación de eventos (un solo listener en la grilla).
+	 */
 	private renderIconsTab(container: HTMLElement): void {
 		const bar = container.createDiv({ cls: "rb-internet-search-bar" });
 		const searchInput = bar.createEl("input", {
@@ -469,14 +509,29 @@ export class BookmarkItemModal extends Modal {
 
 		const grid = container.createDiv({ cls: "rb-icon-grid" });
 
-		// Primer cuadro: "+" para cargar un SVG desde el dispositivo
+		this.gridObserver = new IntersectionObserver(
+			(entries) => {
+				for (let i = 0; i < entries.length; i++) {
+					const entry = entries[i];
+					if (entry.isIntersecting) {
+						const cell = entry.target as HTMLElement;
+						this.ensureCellIconRendered(cell);
+						this.gridObserver?.unobserve(cell);
+					}
+				}
+			},
+			{ root: grid, rootMargin: "120px" }
+		);
+
+		// 1. Primer cuadro: "+" para cargar un SVG desde el dispositivo
 		const addCell = grid.createDiv({
 			cls: "rb-icon-cell rb-icon-cell-add",
 			attr: { "aria-label": this.t("addSvg") },
 		});
 		const plusBox = addCell.createDiv({ cls: "rb-icon-cell-svg" });
 		setIcon(plusBox, "plus");
-		addCell.onclick = () => {
+		addCell.onclick = (evt) => {
+			evt.stopPropagation();
 			const input = document.createElement("input");
 			input.type = "file";
 			input.accept = ".svg,image/svg+xml";
@@ -495,92 +550,116 @@ export class BookmarkItemModal extends Modal {
 					svg: finalSvg,
 				};
 				await this.onSaveCustomIconCb(newSaved);
+				this.iconTouchedByUser = true;
 				this.draft.iconSource = "custom-svg";
 				this.draft.customSvg = finalSvg;
+				this.draft.onlineIconKey = undefined;
 				this.updateIconPreview();
-				this.render();
+				this.rebuildIconSection();
 			};
 			input.click();
 		};
 
-		for (const saved of this.customIcons) {
+		// Mapa de SVGs personalizados por etiqueta para delegación de clic
+		const customSvgByLabel = new Map<string, string>();
+
+		// 2. Íconos cargados por el usuario
+		for (let i = 0; i < this.customIcons.length; i++) {
+			const saved = this.customIcons[i];
 			const iconId = `rb-saved-custom-${saved.id}`;
-			addIcon(iconId, saved.svg);
+			registerIconOnce(iconId, saved.svg);
+			customSvgByLabel.set(saved.label, saved.svg);
+
 			const cell = grid.createDiv({
-				cls:
-					"rb-icon-cell" +
-					(this.draft.iconSource === "custom-svg" && this.draft.customSvg === saved.svg ? " is-selected" : ""),
-				attr: { "aria-label": saved.label },
+				cls: "rb-icon-cell",
+				attr: {
+					"aria-label": saved.label,
+					"data-rb-kind": "custom",
+					"data-rb-icon-id": iconId,
+				},
 			});
-			const iconBox = cell.createDiv({ cls: "rb-icon-cell-svg" });
-			setIcon(iconBox, iconId);
-			cell.onclick = () => {
-				this.iconTouchedByUser = true;
-				this.draft.iconSource = "custom-svg";
-				this.draft.customSvg = saved.svg;
-				this.updateIconPreview();
-				this.render();
-			};
+			this.ensureCellIconRendered(cell);
+			this.cellByLabel.set(saved.label, cell);
 		}
 
+		// 3. Logos vectoriales integrados
 		for (const [key, item] of Object.entries(BUILTIN_BRAND_SVGS)) {
 			const svg = getBuiltinBrandSvg(key);
 			if (!svg) continue;
 			const iconId = `rb-brand-${key}`;
-			addIcon(iconId, svg);
+			registerIconOnce(iconId, svg);
+			customSvgByLabel.set(item.label, svg);
+
 			const cell = grid.createDiv({
-				cls:
-					"rb-icon-cell" +
-					(this.draft.iconSource === "custom-svg" && this.draft.customSvg === svg ? " is-selected" : ""),
-				attr: { "aria-label": item.label },
+				cls: "rb-icon-cell",
+				attr: {
+					"aria-label": item.label,
+					"data-rb-kind": "custom",
+					"data-rb-icon-id": iconId,
+				},
 			});
-			const preview = cell.createDiv({ cls: "rb-icon-cell-svg" });
-			setIcon(preview, iconId);
-			cell.onclick = () => {
-				this.iconTouchedByUser = true;
-				this.draft.iconSource = "custom-svg";
-				this.draft.customSvg = svg;
-				this.updateIconPreview();
-				this.render();
-			};
+			this.ensureCellIconRendered(cell);
+			this.cellByLabel.set(item.label, cell);
 		}
 
-		// Toda la librería de Lucide, filtrable, a continuación de los íconos cargados
+		// 4. Toda la librería de Lucide (renderizado perezoso conforme entra en vista)
 		const allIcons = getAllObsidianLucideIcons();
+		const lucideCells: Array<{ cell: HTMLElement; lowerName: string }> = [];
+		const fragment = document.createDocumentFragment();
 
-		const renderLucideCells = (query: string) => {
-			grid.querySelectorAll('[data-rb-kind="lucide"]').forEach((c) => c.remove());
-			const q = query.toLowerCase().trim();
-			const filtered = q ? allIcons.filter((id) => id.toLowerCase().includes(q)) : allIcons;
-			for (const iconName of filtered) {
-				const cell = grid.createDiv({
-					cls: "rb-icon-cell",
-					attr: { "aria-label": iconName },
-				});
-				cell.setAttribute("data-rb-kind", "lucide");
-				const iconSpan = cell.createDiv({ cls: "rb-icon-cell-svg" });
-				setIcon(iconSpan, iconName);
-				cell.onclick = () => {
-					this.iconTouchedByUser = true;
-					this.draft.iconSource = "lucide";
-					this.draft.lucideIcon = iconName;
-					this.draft.customSvg = undefined;
-					this.draft.onlineIconKey = undefined;
-					this.updateIconPreview();
-					grid.querySelectorAll(".rb-icon-cell").forEach((c) => c.removeClass("is-selected"));
-					cell.addClass("is-selected");
-					addCell.insertAdjacentElement("afterend", cell);
-				};
+		for (let i = 0; i < allIcons.length; i++) {
+			const iconName = allIcons[i];
+			const cell = document.createElement("div");
+			cell.className = "rb-icon-cell";
+			cell.setAttribute("aria-label", iconName);
+			cell.setAttribute("data-rb-kind", "lucide");
+			cell.setAttribute("data-rb-icon-id", iconName);
+			fragment.appendChild(cell);
+			this.cellByLabel.set(iconName, cell);
+			lucideCells.push({ cell, lowerName: iconName.toLowerCase() });
+			this.gridObserver.observe(cell);
+		}
+		grid.appendChild(fragment);
+
+		// Delegación de eventos en la grilla (un único listener para las ~1600 celdas)
+		grid.addEventListener("click", (evt: MouseEvent) => {
+			const target = (evt.target as HTMLElement | null)?.closest(".rb-icon-cell") as HTMLElement | null;
+			if (!target || target === addCell) return;
+			const kind = target.getAttribute("data-rb-kind");
+			const label = target.getAttribute("aria-label") || "";
+			if (!label) return;
+
+			this.iconTouchedByUser = true;
+			if (kind === "custom") {
+				const svg = customSvgByLabel.get(label);
+				if (!svg) return;
+				this.draft.iconSource = "custom-svg";
+				this.draft.customSvg = svg;
+				this.draft.onlineIconKey = undefined;
+			} else if (kind === "lucide") {
+				this.draft.iconSource = "lucide";
+				this.draft.lucideIcon = label;
+				this.draft.customSvg = undefined;
+				this.draft.onlineIconKey = undefined;
 			}
-		};
+			this.updateIconPreview();
+			this.selectAndPositionCell(target, grid);
+		});
 
-		renderLucideCells("");
-		searchInput.addEventListener("input", () => renderLucideCells(searchInput.value));
+		// Filtrado instantáneo sin recrear nodos DOM
+		searchInput.addEventListener("input", () => {
+			const q = searchInput.value.toLowerCase().trim();
+			for (let i = 0; i < lucideCells.length; i++) {
+				const entry = lucideCells[i];
+				entry.cell.hidden = q.length > 0 && !entry.lowerName.includes(q);
+			}
+		});
 
-		// El botón "+" siempre va primero; el ícono en uso queda justo después
-		const selected = grid.querySelector(".rb-icon-cell.is-selected") as HTMLElement | null;
-		if (selected) {
-			addCell.insertAdjacentElement("afterend", selected);
+		// Marcar y posicionar de segundo (justo después del "+") el ícono actualmente en uso
+		const initialLabel = this.getCurrentTargetLabel();
+		if (initialLabel) {
+			const initialCell = this.cellByLabel.get(initialLabel);
+			this.selectAndPositionCell(initialCell, grid);
 		}
 	}
 
@@ -603,38 +682,42 @@ export class BookmarkItemModal extends Modal {
 			this.draft.iconSource === "online" &&
 			(this.draft.onlineIconKey === key || this.draft.customSvg === svg);
 
-		const applyOnlineIcon = (key: string, svg: string) => {
+		const applyOnlineIcon = (key: string, svg: string, cell: HTMLElement) => {
 			this.iconTouchedByUser = true;
 			this.draft.iconSource = "online";
 			this.draft.onlineIconKey = key;
 			this.draft.customSvg = svg;
 			this.updateIconPreview();
 			void this.onSaveOnlineIconCb({ key, svg });
-			grid.querySelectorAll(".rb-icon-cell").forEach((c) => c.removeClass("is-selected"));
+			this.selectAndPositionCell(cell, grid);
 		};
 
-		// Sin búsqueda: se muestran los íconos que ya se usaron desde internet
 		const renderSaved = () => {
 			grid.empty();
+			this.cellByLabel.clear();
+			this.selectedCellEl = null;
+
 			const saved = [...this.savedOnlineIcons];
 			const currentKey = this.draft.onlineIconKey;
 			const currentSvg = this.draft.customSvg;
 			if (this.draft.iconSource === "online" && currentKey && currentSvg && !saved.some((s) => s.key === currentKey)) {
 				saved.unshift({ key: currentKey, svg: currentSvg });
 			}
-			for (const entry of saved) {
+			for (let i = 0; i < saved.length; i++) {
+				const entry = saved[i];
+				const selected = isCurrentOnline(entry.key, entry.svg);
 				const cell = grid.createDiv({
-					cls: "rb-icon-cell" + (isCurrentOnline(entry.key, entry.svg) ? " is-selected" : ""),
+					cls: "rb-icon-cell" + (selected ? " is-selected" : ""),
 					attr: { "aria-label": entry.key },
 				});
+				if (selected) this.selectedCellEl = cell;
+				this.cellByLabel.set(entry.key, cell);
+
 				const svgBox = cell.createDiv({ cls: "rb-icon-cell-svg" });
 				const tempId = `rb-net-${entry.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-				addIcon(tempId, entry.svg);
+				registerIconOnce(tempId, entry.svg);
 				setIcon(svgBox, tempId);
-				cell.onclick = () => {
-					applyOnlineIcon(entry.key, entry.svg);
-					cell.addClass("is-selected");
-				};
+				cell.onclick = () => applyOnlineIcon(entry.key, entry.svg, cell);
 			}
 		};
 
@@ -645,9 +728,14 @@ export class BookmarkItemModal extends Modal {
 				return;
 			}
 			grid.empty();
+			this.cellByLabel.clear();
+			this.selectedCellEl = null;
+
 			const icons = await searchOnlineMonochromeIcons(q, 96);
-			for (const iconKey of icons) {
+			for (let i = 0; i < icons.length; i++) {
+				const iconKey = icons[i];
 				const cell = grid.createDiv({ cls: "rb-icon-cell", attr: { "aria-label": iconKey } });
+				this.cellByLabel.set(iconKey, cell);
 				const svgBox = cell.createDiv({ cls: "rb-icon-cell-svg" });
 				setIcon(svgBox, "loader");
 
@@ -655,21 +743,21 @@ export class BookmarkItemModal extends Modal {
 					svgBox.empty();
 					if (svg) {
 						const tempId = `rb-net-${iconKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-						addIcon(tempId, svg);
+						registerIconOnce(tempId, svg);
 						setIcon(svgBox, tempId);
-						if (isCurrentOnline(iconKey, svg)) cell.addClass("is-selected");
-						cell.onclick = () => {
-							applyOnlineIcon(iconKey, svg);
+						if (isCurrentOnline(iconKey, svg)) {
 							cell.addClass("is-selected");
-						};
+							this.selectedCellEl = cell;
+						}
+						cell.onclick = () => applyOnlineIcon(iconKey, svg, cell);
 					} else {
 						cell.remove();
+						this.cellByLabel.delete(iconKey);
 					}
 				});
 			}
 		};
 
-		// Estado inicial de la pestaña
 		renderSaved();
 
 		searchBtn.onclick = runSearch;
