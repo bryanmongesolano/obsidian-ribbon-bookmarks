@@ -1,37 +1,63 @@
-# Submit Ribbon Bookmarks to the community directory
+# Publicar Ribbon Bookmarks en el directorio comunitario
 
 Repo: https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks
 
-## Requirements already satisfied in this repo
+## Estado actual
 
-- [x] `LICENSE`, `README.md`, `manifest.json`, `versions.json` on `main`
-- [x] GitHub release whose tag matches the `version` in `manifest.json`, with `main.js`, `manifest.json` and `styles.css` attached
-- [x] No telemetry, no hardcoded user data, no network calls except the optional icon search
+- [x] Repositorio público en GitHub
+- [x] `LICENSE` (MIT), `README.md` bilingüe, `manifest.json`, `versions.json`
+- [x] Sin telemetría, sin datos personales, sin `console.log`
+- [x] Sin dependencias de otros plugins (detecta y delega)
+- [x] GitHub Action de release en `.github/workflows/release.yml`
+- [x] Release publicado con `main.js`, `manifest.json` y `styles.css` adjuntos
 
-## Steps for the maintainer (browser)
+## Requisitos que valida la revisión de Obsidian
 
-1. Sign in at https://community.obsidian.md with the Obsidian account.
-2. Profile → link the GitHub account (`bryanmongesolano`).
-3. Sidebar → **Plugins** → **New plugin**.
-4. Repository URL: `https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks`
-5. Accept the developer policies and confirm ongoing support.
-6. Submit.
+| Requisito | Estado |
+| --- | --- |
+| Repositorio público con `manifest.json` en la raíz | Cumplido |
+| `versions.json` con la versión actual | Cumplido |
+| Release cuyo tag coincida exactamente con `version` del manifest | Cumplido |
+| El release incluye `main.js`, `manifest.json` y `styles.css` | Cumplido |
+| `id` en kebab-case igual al nombre del plugin | `ribbon-bookmarks` |
+| La `description` no menciona "Obsidian" ni "plugin" | Cumplido |
+| Sin uso de APIs internas no documentadas sin respaldo | Cumplido (todo con `try/catch` y respaldo) |
+| Sin acceso a red salvo la búsqueda opcional de íconos | Cumplido |
 
-## After submission
+## Paso manual en el portal (lo hace Bryan)
 
-- Address automated review feedback in the portal.
-- Wait for manual review (usually several days).
-- Once approved it can be installed from **Settings → Community plugins → Browse**.
+El envío ya no se hace por Pull Request. Se hace en el portal:
 
-## Future releases
+1. Entrar a **https://community.obsidian.md** con la cuenta de Obsidian.
+2. En el perfil, vincular la cuenta de GitHub (`bryanmongesolano`).
+3. En la barra lateral, ir a **Plugins** → **New plugin**.
+4. Pegar la URL del repositorio: `https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks`
+5. Aceptar las políticas de desarrollador y confirmar el soporte continuo del plugin.
+6. Enviar.
 
-1. Bump `version` in `manifest.json` and add the entry to `versions.json`.
-2. Commit and push to `main`.
-3. Create and push the matching tag:
+Después del envío:
+
+- Atender los comentarios de la revisión automática en el portal.
+- Esperar la revisión manual (normalmente varios días).
+- Una vez aprobado, el plugin se puede instalar desde **Settings → Community plugins → Browse**.
+
+## Publicar versiones futuras
+
+1. Subir `version` en `manifest.json` y agregar la entrada en `versions.json`.
+2. Subir la misma `version` en `package.json`.
+3. Compilar y desplegar en local:
 
 ```bash
-git tag 1.1.1
-git push origin 1.1.1
+cd ~/Proyectos/obsidian-plugins/ribbon-bookmarks
+OBSIDIAN_VAULT_PLUGINS="<ruta-al-vault>/.obsidian/plugins" npm run deploy
 ```
 
-The GitHub Action builds and uploads `main.js`, `manifest.json` and `styles.css` to the release.
+4. Commit y push a `main`.
+5. Crear y empujar el tag con la misma versión:
+
+```bash
+git tag 1.2.1
+git push origin 1.2.1
+```
+
+La GitHub Action compila y adjunta `main.js`, `manifest.json` y `styles.css` al release automáticamente.

@@ -6,6 +6,7 @@ import {
 	Notice,
 	Plugin,
 	PluginSettingTab,
+	Platform,
 	Setting,
 	TFile,
 	TFolder,
@@ -354,11 +355,13 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			}
 
 			try {
-				// eslint-disable-next-line @typescript-eslint/no-var-requires
-				const electron = require("electron");
-				if (electron?.shell?.openPath) {
-					await electron.shell.openPath(cleanPath);
-					return;
+				if (Platform.isDesktopApp) {
+					// eslint-disable-next-line @typescript-eslint/no-var-requires
+					const electron = require("electron");
+					if (electron?.shell?.openPath) {
+						await electron.shell.openPath(cleanPath);
+						return;
+					}
 				}
 			} catch {
 				// Ignorar
@@ -1577,28 +1580,6 @@ class RibbonBookmarksSettingTab extends PluginSettingTab {
 						this.plugin.renderRibbonItems();
 						this.display();
 					})
-			);
-
-		new Setting(containerEl)
-			.setName(t("settingsActions"))
-			.addButton((btn) =>
-				btn
-					.setButtonText(t("settingsAddItem"))
-					.setCta()
-					.onClick(() => this.plugin.openAddModal())
-			)
-			.addButton((btn) =>
-				btn.setButtonText(t("settingsAddSeparator")).onClick(async () => {
-					this.plugin.settings.items.push({
-						id: crypto.randomUUID(),
-						type: "separator",
-						title: t("defaultSeparator"),
-						iconSource: "auto",
-					});
-					await this.plugin.saveSettings();
-					this.plugin.renderRibbonItems();
-					this.display();
-				})
 			);
 	}
 }

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-ribbon-bookmarks",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"description": "A bookmark bar in the left ribbon: web links, any file, nested folders, separators, drag and drop, and monochrome icons.",
 	"main": "main.js",
 	"type": "module",
