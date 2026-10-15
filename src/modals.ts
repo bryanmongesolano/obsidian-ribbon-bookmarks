@@ -1,11 +1,13 @@
 import { App, Modal, Notice, Setting, TFile, addIcon, setIcon, setTooltip } from "obsidian";
 import {
 	BUILTIN_BRAND_SVGS,
+	detectKnownUrlIcon,
 	fetchIconifySvg,
 	getAllObsidianLucideIcons,
 	getBuiltinBrandSvg,
 	getLucideIconForFilePath,
 	getOrRegisterItemIconId,
+	parseUrlLoose,
 	resolveAutoIconForUrl,
 	sanitizeAndMonochromizeSvg,
 	searchOnlineMonochromeIcons,
@@ -182,37 +184,73 @@ export class BookmarkItemModal extends Modal {
 	}
 
 	/**
-	 * Al escribir o pegar una URL, se detecta su ícono y queda marcado visualmente
-	 * en la sección de íconos (igual que los íconos predefinidos y cargados).
+	 * Al escribir o pegar una URL, el ícono se reconoce al instante usando el catálogo
+	 * local de marcas (independiente de http/https y de que la URL esté completa).
+	 * Solo si el sitio no está en el catálogo se intenta, tras una pausa breve, bajar
+	 * su logo vectorial desde internet.
 	 */
 	private scheduleAutoIconDetection(): void {
 		if (this.iconTouchedByUser) return;
+		const url = (this.draft.url || "").trim();
+
+		// 1. Reconocimiento local inmediato
+		const known = detectKnownUrlIcon(url);
+		if (known.customSvg) {
+			this.applyDetectedIcon("custom-svg", known.customSvg, known.lucideIcon, undefined);
+		} else {
+			this.applyDetectedIcon("lucide", undefined, known.lucideIcon || "globe", undefined);
+		}
+
+		// 2. Logo del sitio desde internet (solo si no se reconoció localmente)
 		if (this.autoDetectTimer !== null) {
 			window.clearTimeout(this.autoDetectTimer);
+			this.autoDetectTimer = null;
 		}
+		if (known.customSvg || !this.looksLikeCompleteDomain(url)) return;
+
 		this.autoDetectTimer = window.setTimeout(async () => {
 			this.autoDetectTimer = null;
-			const url = (this.draft.url || "").trim();
-			if (!url || !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return;
-
-			const resolved = await resolveAutoIconForUrl(url);
-			this.draft.iconSource = resolved.iconSource;
-			this.draft.customSvg = resolved.customSvg;
-			this.draft.lucideIcon = resolved.lucideIcon;
-
-			const newTab = resolved.iconSource === "lucide" ? "lucide" : "custom";
-			const sameTab =
-				this.activeIconTab === newTab &&
-				this.iconPickerWrapperEl?.getAttribute("data-rb-tab") === newTab;
-			this.activeIconTab = newTab;
-
-			this.updateIconPreview();
-			if (sameTab) {
-				this.markDetectedIconInPlace();
-			} else {
-				this.rebuildIconSection();
+			if (this.iconTouchedByUser) return;
+			const resolved = await resolveAutoIconForUrl((this.draft.url || "").trim());
+			if (resolved.iconSource !== "online" || !resolved.customSvg) return;
+			if (this.iconTouchedByUser) return;
+			this.applyDetectedIcon("online", resolved.customSvg, resolved.lucideIcon, resolved.onlineKey);
+			if (resolved.onlineKey) {
+				void this.onSaveOnlineIconCb({ key: resolved.onlineKey, svg: resolved.customSvg });
 			}
-		}, 400);
+		}, 500);
+	}
+
+	/** Verdadero cuando lo escrito ya parece un dominio completo (evita consultas mientras se escribe). */
+	private looksLikeCompleteDomain(raw: string): boolean {
+		const parsed = parseUrlLoose(raw);
+		if (!parsed) return false;
+		return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(parsed.hostname) && parsed.hostname.includes(".");
+	}
+
+	/** Aplica el ícono detectado, cambia a la pestaña correspondiente y lo marca. */
+	private applyDetectedIcon(
+		source: "custom-svg" | "lucide" | "online",
+		customSvg: string | undefined,
+		lucideIcon: string | undefined,
+		onlineKey: string | undefined
+	): void {
+		this.draft.iconSource = source;
+		this.draft.customSvg = customSvg;
+		this.draft.lucideIcon = lucideIcon;
+		this.draft.onlineIconKey = onlineKey;
+
+		const newTab = source === "online" ? "internet" : source === "custom-svg" ? "custom" : "lucide";
+		const sameTab =
+			this.activeIconTab === newTab && this.iconPickerWrapperEl?.getAttribute("data-rb-tab") === newTab;
+		this.activeIconTab = newTab;
+
+		this.updateIconPreview();
+		if (sameTab) {
+			this.markDetectedIconInPlace();
+		} else {
+			this.rebuildIconSection();
+		}
 	}
 
 	/** Reconstruye únicamente la sección de íconos, conservando el resto del modal y el foco. */
@@ -251,6 +289,8 @@ export class BookmarkItemModal extends Modal {
 					}
 				}
 			}
+		} else if (this.draft.iconSource === "online" && this.draft.onlineIconKey) {
+			label = this.draft.onlineIconKey;
 		} else if (this.draft.lucideIcon) {
 			label = this.draft.lucideIcon;
 		}
@@ -717,6 +757,10 @@ export class BookmarkItemModal extends Modal {
 					this.draft.iconSource = resolved.iconSource;
 					this.draft.customSvg = resolved.customSvg;
 					this.draft.lucideIcon = resolved.lucideIcon;
+					this.draft.onlineIconKey = resolved.onlineKey;
+					if (resolved.iconSource === "online" && resolved.onlineKey && resolved.customSvg) {
+						void this.onSaveOnlineIconCb({ key: resolved.onlineKey, svg: resolved.customSvg });
+					}
 				}
 			} else if (this.draft.type === "file") {
 				if (!this.draft.filePath?.trim()) {

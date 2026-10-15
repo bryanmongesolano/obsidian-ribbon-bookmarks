@@ -1232,6 +1232,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 						iconSource: resolved.iconSource,
 						customSvg: resolved.customSvg,
 						lucideIcon: resolved.lucideIcon,
+						onlineIconKey: resolved.onlineKey,
 					});
 					return results;
 				}
@@ -1335,6 +1336,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 						iconSource: resolved.iconSource,
 						customSvg: resolved.customSvg,
 						lucideIcon: resolved.lucideIcon,
+						onlineIconKey: resolved.onlineKey,
 					});
 					return results;
 				}
@@ -1446,6 +1448,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				iconSource: resolved.iconSource,
 				customSvg: resolved.customSvg,
 				lucideIcon: resolved.lucideIcon,
+				onlineIconKey: resolved.onlineKey,
 			});
 		}
 

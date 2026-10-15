@@ -64,45 +64,63 @@ export function getBuiltinBrandSvg(key: string): string | null {
 	return wrapSvgForObsidian(entry.viewBox, entry.body);
 }
 
-export function detectKnownUrlIcon(urlStr: string): { customSvg?: string; lucideIcon?: string } {
-	try {
-		const u = new URL(urlStr);
-		const host = u.hostname.toLowerCase();
-		const full = (host + u.pathname).toLowerCase();
-
-		if (host === "docs.new" || full.includes("docs.google.com/document")) {
-			return { customSvg: getBuiltinBrandSvg("google-docs") ?? undefined, lucideIcon: "file" };
-		}
-		if (host === "sheets.new" || full.includes("docs.google.com/spreadsheets")) {
-			return { customSvg: getBuiltinBrandSvg("google-sheets") ?? undefined, lucideIcon: "sheet" };
-		}
-		if (host === "slides.new" || full.includes("docs.google.com/presentation")) {
-			return { customSvg: getBuiltinBrandSvg("google-slides") ?? undefined, lucideIcon: "presentation" };
-		}
-		if (host.includes("drive.google.com")) {
-			return { customSvg: getBuiltinBrandSvg("google-drive") ?? undefined, lucideIcon: "cloud" };
-		}
-		if (host.includes("gemini.google.com")) {
-			return { customSvg: getBuiltinBrandSvg("google-gemini") ?? undefined, lucideIcon: "sparkle" };
-		}
-		if (host.includes("notebooklm.google.com")) {
-			return { customSvg: getBuiltinBrandSvg("notebooklm") ?? undefined, lucideIcon: "book-a" };
-		}
-		if (host.includes("moodle")) {
-			return { customSvg: getBuiltinBrandSvg("moodle") ?? undefined, lucideIcon: "school" };
-		}
-		if (host.includes("github.com")) {
-			return { customSvg: getBuiltinBrandSvg("github") ?? undefined, lucideIcon: "github" };
-		}
-		if (host.includes("youtube.com") || host.includes("youtu.be")) {
-			return { customSvg: getBuiltinBrandSvg("youtube") ?? undefined, lucideIcon: "video" };
-		}
-		if (host === "www.google.com" || host === "google.com") {
-			return { customSvg: getBuiltinBrandSvg("google") ?? undefined, lucideIcon: "globe" };
-		}
-	} catch {
-		// URL inválida
+/**
+ * Interpreta una URL escrita a medias: si no tiene esquema se le agrega https://
+ * y al comparar se ignoran mayúsculas, "www." y el esquema. Así la detección del
+ * ícono funciona mientras se escribe y da igual si es http o https.
+ */
+export function parseUrlLoose(raw: string): URL | null {
+	const trimmed = (raw || "").trim();
+	if (!trimmed) return null;
+	let candidate = trimmed;
+	if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(candidate)) {
+		candidate = "https://" + candidate.replace(/^\/+/, "");
 	}
+	try {
+		return new URL(candidate);
+	} catch {
+		return null;
+	}
+}
+
+export function detectKnownUrlIcon(urlStr: string): { customSvg?: string; lucideIcon?: string } {
+	const u = parseUrlLoose(urlStr);
+	if (!u) return {};
+
+	const host = u.hostname.toLowerCase();
+	const full = (host + u.pathname).toLowerCase();
+
+	if (host === "docs.new" || full.includes("docs.google.com/document")) {
+		return { customSvg: getBuiltinBrandSvg("google-docs") ?? undefined, lucideIcon: "file" };
+	}
+	if (host === "sheets.new" || full.includes("docs.google.com/spreadsheets")) {
+		return { customSvg: getBuiltinBrandSvg("google-sheets") ?? undefined, lucideIcon: "sheet" };
+	}
+	if (host === "slides.new" || full.includes("docs.google.com/presentation")) {
+		return { customSvg: getBuiltinBrandSvg("google-slides") ?? undefined, lucideIcon: "presentation" };
+	}
+	if (host.includes("drive.google.com")) {
+		return { customSvg: getBuiltinBrandSvg("google-drive") ?? undefined, lucideIcon: "cloud" };
+	}
+	if (host.includes("gemini.google.com")) {
+		return { customSvg: getBuiltinBrandSvg("google-gemini") ?? undefined, lucideIcon: "sparkle" };
+	}
+	if (host.includes("notebooklm.google.com")) {
+		return { customSvg: getBuiltinBrandSvg("notebooklm") ?? undefined, lucideIcon: "book-a" };
+	}
+	if (host.includes("moodle")) {
+		return { customSvg: getBuiltinBrandSvg("moodle") ?? undefined, lucideIcon: "school" };
+	}
+	if (host.includes("github.com")) {
+		return { customSvg: getBuiltinBrandSvg("github") ?? undefined, lucideIcon: "github" };
+	}
+	if (host.includes("youtube.com") || host.includes("youtu.be")) {
+		return { customSvg: getBuiltinBrandSvg("youtube") ?? undefined, lucideIcon: "video" };
+	}
+	if (host === "www.google.com" || host === "google.com") {
+		return { customSvg: getBuiltinBrandSvg("google") ?? undefined, lucideIcon: "globe" };
+	}
+
 	return {};
 }
 
@@ -307,9 +325,10 @@ export async function fetchIconifySvg(iconId: string): Promise<string | null> {
 }
 
 export async function resolveAutoIconForUrl(urlStr: string): Promise<{
-	iconSource: "custom-svg" | "lucide";
+	iconSource: "custom-svg" | "lucide" | "online";
 	customSvg?: string;
 	lucideIcon?: string;
+	onlineKey?: string;
 }> {
 	const known = detectKnownUrlIcon(urlStr);
 	if (known.customSvg) {
@@ -319,18 +338,17 @@ export async function resolveAutoIconForUrl(urlStr: string): Promise<{
 		return { iconSource: "lucide", lucideIcon: known.lucideIcon };
 	}
 
-	try {
-		const u = new URL(urlStr);
-		const parts = u.hostname.replace(/^www\./i, "").split(".");
+	const parsed = parseUrlLoose(urlStr);
+	if (parsed) {
+		const parts = parsed.hostname.replace(/^www\./i, "").split(".");
 		const domainKeyword = parts[0];
 		if (domainKeyword && domainKeyword.length >= 2) {
-			const directSvg = await fetchIconifySvg(`simple-icons:${domainKeyword.toLowerCase()}`);
+			const key = `simple-icons:${domainKeyword.toLowerCase()}`;
+			const directSvg = await fetchIconifySvg(key);
 			if (directSvg) {
-				return { iconSource: "custom-svg", customSvg: directSvg, lucideIcon: "globe" };
+				return { iconSource: "online", customSvg: directSvg, lucideIcon: "globe", onlineKey: key };
 			}
 		}
-	} catch {
-		// Ignorar
 	}
 
 	return { iconSource: "lucide", lucideIcon: "globe" };
