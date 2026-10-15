@@ -34,10 +34,15 @@ export class BookmarkItemModal extends Modal {
 	private onDeleteCb?: (item: RibbonBookmarkItem) => Promise<void> | void;
 	private activeIconTab: "custom" | "lucide" | "internet" = "custom";
 	private iconPreviewBoxEl: HTMLElement | null = null;
+	private iconPickerWrapperEl: HTMLElement | null = null;
+	/** Si el usuario eligió el ícono a mano, se deja de autodetectar por URL o ruta */
+	private iconTouchedByUser = false;
+	private autoDetectTimer: number | null = null;
 
 	constructor(opts: BookmarkModalOptions) {
 		super(opts.app);
 		this.isNew = opts.isNew ?? !opts.item;
+		this.iconTouchedByUser = !this.isNew;
 		this.t = opts.t;
 		this.customIcons = opts.customIcons;
 		this.onSaveCustomIconCb = opts.onSaveCustomIcon;
@@ -70,6 +75,10 @@ export class BookmarkItemModal extends Modal {
 	}
 
 	onClose(): void {
+		if (this.autoDetectTimer !== null) {
+			window.clearTimeout(this.autoDetectTimer);
+			this.autoDetectTimer = null;
+		}
 		this.contentEl.empty();
 	}
 
@@ -158,11 +167,93 @@ export class BookmarkItemModal extends Modal {
 				.setValue(this.draft.url || "")
 				.onChange((val) => {
 					this.draft.url = val.trim();
-					if (this.draft.iconSource === "auto") {
-						this.updateIconPreview();
-					}
+					this.scheduleAutoIconDetection();
 				});
 		});
+	}
+
+	/**
+	 * Al escribir o pegar una URL, se detecta su ícono y queda marcado visualmente
+	 * en la sección de íconos (igual que los íconos predefinidos y cargados).
+	 */
+	private scheduleAutoIconDetection(): void {
+		if (this.iconTouchedByUser) return;
+		if (this.autoDetectTimer !== null) {
+			window.clearTimeout(this.autoDetectTimer);
+		}
+		this.autoDetectTimer = window.setTimeout(async () => {
+			this.autoDetectTimer = null;
+			const url = (this.draft.url || "").trim();
+			if (!url || !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return;
+
+			const resolved = await resolveAutoIconForUrl(url);
+			this.draft.iconSource = resolved.iconSource;
+			this.draft.customSvg = resolved.customSvg;
+			this.draft.lucideIcon = resolved.lucideIcon;
+
+			const newTab = resolved.iconSource === "lucide" ? "lucide" : "custom";
+			const sameTab =
+				this.activeIconTab === newTab &&
+				this.iconPickerWrapperEl?.getAttribute("data-rb-tab") === newTab;
+			this.activeIconTab = newTab;
+
+			this.updateIconPreview();
+			if (sameTab) {
+				this.markDetectedIconInPlace();
+			} else {
+				this.rebuildIconSection();
+			}
+		}, 400);
+	}
+
+	/** Reconstruye únicamente la sección de íconos, conservando el resto del modal y el foco. */
+	private rebuildIconSection(): void {
+		const wrapper = this.iconPickerWrapperEl;
+		const parent = wrapper?.parentElement;
+		if (!wrapper || !parent) return;
+		const anchor = wrapper.nextSibling;
+		wrapper.remove();
+		this.renderIconPickerSection(parent);
+		const rebuilt = this.iconPickerWrapperEl;
+		if (rebuilt && rebuilt.parentElement === parent) {
+			parent.insertBefore(rebuilt, anchor);
+		}
+	}
+
+	/** Marca y trae al frente el ícono detectado sin reconstruir toda la grilla. */
+	private markDetectedIconInPlace(): void {
+		const wrapper = this.iconPickerWrapperEl;
+		if (!wrapper) return;
+		const grid = wrapper.querySelector(".rb-icon-grid") as HTMLElement | null;
+		if (!grid) return;
+
+		grid.querySelectorAll(".rb-icon-cell.is-selected").forEach((c) => c.removeClass("is-selected"));
+
+		let label = "";
+		if (this.draft.iconSource === "custom-svg" && this.draft.customSvg) {
+			const saved = this.customIcons.find((s) => s.svg === this.draft.customSvg);
+			if (saved) {
+				label = saved.label;
+			} else {
+				for (const key of Object.keys(BUILTIN_BRAND_SVGS)) {
+					if (getBuiltinBrandSvg(key) === this.draft.customSvg) {
+						label = BUILTIN_BRAND_SVGS[key].label;
+						break;
+					}
+				}
+			}
+		} else if (this.draft.lucideIcon) {
+			label = this.draft.lucideIcon;
+		}
+		if (!label) return;
+
+		const cells = Array.from(grid.querySelectorAll(".rb-icon-cell")) as HTMLElement[];
+		const target = cells.find((c) => c.getAttribute("aria-label") === label);
+		if (!target) return;
+		target.addClass("is-selected");
+		if (grid.firstElementChild !== target) {
+			grid.prepend(target);
+		}
 	}
 
 	private renderFileFields(container: HTMLElement): void {
@@ -177,9 +268,10 @@ export class BookmarkItemModal extends Modal {
 				const parts = rawPath.split("/");
 				this.draft.title = parts[parts.length - 1] || rawPath;
 			}
-			if (this.draft.iconSource === "auto") {
+			if (!this.iconTouchedByUser) {
 				this.draft.lucideIcon = getLucideIconForFilePath(rawPath);
 				this.updateIconPreview();
+				this.markDetectedIconInPlace();
 			}
 		};
 
@@ -285,6 +377,8 @@ export class BookmarkItemModal extends Modal {
 
 	private renderIconPickerSection(container: HTMLElement): void {
 		const wrapper = container.createDiv({ cls: "rb-icon-picker-wrapper" });
+		wrapper.setAttribute("data-rb-tab", this.activeIconTab);
+		this.iconPickerWrapperEl = wrapper;
 
 		const topBar = wrapper.createDiv({ cls: "rb-icon-picker-topbar" });
 		this.iconPreviewBoxEl = topBar.createDiv({ cls: "rb-icon-preview-box" });
@@ -368,6 +462,7 @@ export class BookmarkItemModal extends Modal {
 			const iconBox = cell.createDiv({ cls: "rb-icon-cell-svg" });
 			setIcon(iconBox, iconId);
 			cell.onclick = () => {
+				this.iconTouchedByUser = true;
 				this.draft.iconSource = "custom-svg";
 				this.draft.customSvg = saved.svg;
 				this.updateIconPreview();
@@ -389,6 +484,7 @@ export class BookmarkItemModal extends Modal {
 			const preview = cell.createDiv({ cls: "rb-icon-cell-svg" });
 			setIcon(preview, iconId);
 			cell.onclick = () => {
+				this.iconTouchedByUser = true;
 				this.draft.iconSource = "custom-svg";
 				this.draft.customSvg = svg;
 				this.updateIconPreview();
@@ -436,6 +532,7 @@ export class BookmarkItemModal extends Modal {
 				const iconSpan = cell.createDiv({ cls: "rb-icon-cell-svg" });
 				setIcon(iconSpan, iconName);
 				cell.onclick = () => {
+					this.iconTouchedByUser = true;
 					this.draft.iconSource = "lucide";
 					this.draft.lucideIcon = iconName;
 					this.draft.customSvg = undefined;
@@ -481,6 +578,7 @@ export class BookmarkItemModal extends Modal {
 						addIcon(tempId, svg);
 						setIcon(svgBox, tempId);
 						cell.onclick = () => {
+							this.iconTouchedByUser = true;
 							this.draft.iconSource = "custom-svg";
 							this.draft.customSvg = svg;
 							this.updateIconPreview();
