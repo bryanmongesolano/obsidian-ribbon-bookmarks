@@ -404,21 +404,33 @@ export class BookmarkItemModal extends Modal {
 			type: "text",
 			placeholder: this.t("iconSearchPlaceholder"),
 			cls: "rb-icon-search-input",
-			value: this.draft.iconSource === "lucide" ? this.draft.lucideIcon || "" : "",
 		});
 
 		const grid = container.createDiv({ cls: "rb-icon-grid" });
 		const allIcons = getAllObsidianLucideIcons();
 
+		// Ícono de Lucide que el ítem está usando actualmente (si lo hay)
+		const getCurrentIcon = (): string =>
+			this.draft.iconSource !== "custom-svg" && this.draft.lucideIcon ? this.draft.lucideIcon : "";
+
 		const renderGrid = (query: string) => {
 			grid.empty();
 			const q = query.toLowerCase().trim();
 			const filtered = q ? allIcons.filter((id) => id.toLowerCase().includes(q)) : allIcons;
-			for (const iconName of filtered) {
+			const current = getCurrentIcon();
+
+			// El ícono en uso va siempre primero y queda marcado
+			let ordered = filtered;
+			if (current) {
+				const rest = filtered.filter((id) => id !== current);
+				if (!q || filtered.includes(current)) {
+					ordered = [current, ...rest];
+				}
+			}
+
+			for (const iconName of ordered) {
 				const cell = grid.createDiv({
-					cls:
-						"rb-icon-cell" +
-						(this.draft.iconSource === "lucide" && this.draft.lucideIcon === iconName ? " is-selected" : ""),
+					cls: "rb-icon-cell" + (iconName === current ? " is-selected" : ""),
 					attr: { "aria-label": iconName },
 				});
 				const iconSpan = cell.createDiv({ cls: "rb-icon-cell-svg" });
