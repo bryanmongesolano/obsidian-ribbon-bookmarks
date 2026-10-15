@@ -1,17 +1,13 @@
 /* ==========================================================================
-   Ribbon Bookmarks — Estilos minimalistas y nativos para Obsidian
+   Ribbon Bookmarks — minimal, native-looking styles for Obsidian
    ========================================================================== */
 
-/* Suprimir el tooltip negro nativo de Obsidian únicamente mientras se arrastra un ítem */
+/* Hide Obsidian's own tooltip while a drag is in progress (--no-tooltip stops new ones) */
 body.rb-is-dragging {
 	--no-tooltip: true;
 }
 
-body.rb-is-dragging .tooltip {
-	display: none !important;
-}
-
-/* Barra indicadora de posición al arrastrar (barra lateral y dentro de carpetas) */
+/* Drag position indicator (ribbon and inside folder popups) */
 .rb-drop-indicator-bar {
 	position: fixed;
 	height: 4px;
@@ -23,7 +19,7 @@ body.rb-is-dragging .tooltip {
 	transition: top 60ms ease-out, left 60ms ease-out, width 60ms ease-out;
 }
 
-/* Separadores en la barra izquierda */
+/* Separators in the left ribbon */
 .side-dock-actions .side-dock-ribbon-action.rb-ribbon-separator {
 	height: 1px;
 	min-height: 1px;
@@ -46,16 +42,42 @@ body.rb-is-dragging .tooltip {
 	opacity: 0.45;
 }
 
-/* No forzar fill sobre íconos de línea de Lucide */
+/* Label row with a trailing "?" help icon */
+.rb-setting-label-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.rb-help-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-faint);
+	cursor: help;
+	transition: color 120ms ease;
+}
+
+.rb-help-icon:hover {
+	color: var(--text-normal);
+}
+
+.rb-help-icon svg.svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+/* Keep the native icon color; never force a fill on Lucide outline icons */
 .side-dock-actions .side-dock-ribbon-action.rb-ribbon-item svg.svg-icon {
 	color: var(--icon-color);
 }
 
-/* Resaltado morado al arrastrar sobre el centro de un ítem (crear o entrar a carpeta) */
-.side-dock-actions .side-dock-ribbon-action.rb-drop-inside,
-.rb-folder-popup-item.rb-drop-inside {
-	background-color: var(--background-modifier-active-hover) !important;
-	outline: 2px dashed var(--interactive-accent) !important;
+/* Purple highlight while dragging over the center of an item (to create or enter a folder).
+   Extra class selectors raise specificity so no !important is needed. */
+.side-dock-actions .side-dock-ribbon-action.rb-ribbon-item.rb-drop-inside,
+.menu.rb-folder-popup .menu-item.rb-folder-popup-item.rb-drop-inside {
+	background-color: var(--background-modifier-active-hover);
+	outline: 2px dashed var(--interactive-accent);
 	outline-offset: -2px;
 	border-radius: var(--radius-s);
 }
@@ -66,7 +88,7 @@ body.rb-is-dragging .tooltip {
 }
 
 /* ==========================================================================
-   Popup de carpeta en cascada
+   Cascading folder popup
    ========================================================================== */
 .menu.rb-folder-popup {
 	min-width: 190px;
@@ -78,7 +100,7 @@ body.rb-is-dragging .tooltip {
 	transition: background-color 90ms ease, color 90ms ease;
 }
 
-/* Mismo hover que los íconos del Ribbon */
+/* Same hover treatment as the ribbon icons */
 .rb-folder-popup .menu-item:hover,
 .rb-folder-popup .menu-item.tappable:hover {
 	background-color: var(--background-modifier-hover);
@@ -106,14 +128,15 @@ body.rb-is-dragging .tooltip {
 }
 
 /* ==========================================================================
-   Modal Minimalista (Nuevo / Modificar ítem o carpeta)
+   Minimal modal (new / edit item or folder)
    ========================================================================== */
 .modal.rb-bookmark-modal {
 	width: min(540px, 92vw);
 	padding: 16px 20px 18px;
 }
 
-/* Encabezado: título a la izquierda y X a la derecha, en la misma línea, con una sola línea divisora */
+/* Header: title on the left and the close button on the right, on the same line,
+   with a single divider below */
 .modal.rb-bookmark-modal .modal-header {
 	display: flex;
 	align-items: center;
@@ -144,61 +167,37 @@ body.rb-is-dragging .tooltip {
 	padding: 0;
 }
 
-/* Sin líneas separadoras entre los campos y con espaciado vertical minimo */
-.modal.rb-bookmark-modal .setting-item {
-	border-top: none !important;
-	border-bottom: none !important;
-	padding: 5px 0 !important;
+/* No separators between fields, with a tight vertical rhythm.
+   The extra .rb-form class raises specificity above Obsidian's defaults. */
+.modal.rb-bookmark-modal .rb-form .setting-item {
+	border-top: none;
+	border-bottom: none;
+	padding: 5px 0;
 	min-height: 0;
 	align-items: center;
 }
 
-.modal.rb-bookmark-modal .setting-item-info {
+.modal.rb-bookmark-modal .rb-form .setting-item-info {
 	margin: 0;
 }
 
-.modal.rb-bookmark-modal .setting-item-name,
-.modal.rb-bookmark-modal .setting-item-description {
+.modal.rb-bookmark-modal .rb-form .setting-item-name,
+.modal.rb-bookmark-modal .rb-form .setting-item-description {
 	margin: 0;
 }
 
-.modal.rb-bookmark-modal .setting-item-control {
+.modal.rb-bookmark-modal .rb-form .setting-item-control {
 	min-height: 0;
 	margin: 0;
 }
 
-/* Campos de texto amplios e iguales para Nombre, URL y Archivo */
+/* Name, URL and file inputs share the same comfortable width */
 .modal.rb-bookmark-modal .setting-item-control input.rb-wide-input {
 	width: 300px;
 	max-width: 100%;
 }
 
-/* Etiqueta con ícono "?" de ayuda al lado */
-.rb-setting-label-row {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-}
-
-.rb-help-icon {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	color: var(--text-faint);
-	cursor: help;
-	transition: color 120ms ease;
-}
-
-.rb-help-icon:hover {
-	color: var(--text-normal);
-}
-
-.rb-help-icon svg.svg-icon {
-	width: 14px;
-	height: 14px;
-}
-
-/* Resultados del Vault (solo visibles mientras se escribe una ruta) */
+/* Vault file results (only visible while typing a path) */
 .rb-vault-file-results {
 	margin: 4px 0 8px;
 	max-height: 140px;
@@ -239,7 +238,7 @@ body.rb-is-dragging .tooltip {
 }
 
 /* ==========================================================================
-   Sección de Íconos (previsualización a la izquierda + pestañas a la derecha)
+   Icon section (preview on the left + tabs on the right)
    ========================================================================== */
 .rb-icon-picker-wrapper {
 	margin-top: 8px;
@@ -319,7 +318,7 @@ body.rb-is-dragging .tooltip {
 }
 
 .rb-icon-cell[hidden] {
-	display: none !important;
+	display: none;
 }
 
 .rb-icon-cell:hover {

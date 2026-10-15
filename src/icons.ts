@@ -59,10 +59,10 @@ for (const [k, v] of Object.entries(BUILTIN_BRAND_SVGS)) {
 	BUILTIN_WRAPPED_CACHE[k] = `<svg viewBox="${v.viewBox}" width="100" height="100">${v.body}</svg>`;
 }
 
-/** Caché en memoria de íconos ya registrados en Obsidian para evitar llamadas redundantes a addIcon. */
+/** In-memory cache of icons already registered in Obsidian to avoid redundant addIcon calls. */
 const registeredIconCache = new Map<string, string>();
 
-/** Caché en memoria de SVGs descargados desde Iconify. */
+/** In-memory cache of SVGs downloaded from Iconify. */
 const iconifySvgCache = new Map<string, string>();
 
 let cachedLucideIcons: string[] | null = null;
@@ -83,8 +83,8 @@ export function getBuiltinBrandSvg(key: string): string | null {
 }
 
 /**
- * Interpreta una URL escrita a medias: si no tiene esquema se le agrega https://
- * y al comparar se ignoran mayúsculas, "www." y el esquema.
+ * Parses a partially typed URL: when it has no scheme, https:// is prepended, and
+ * casing, "www." and the scheme are ignored when matching.
  */
 export function parseUrlLoose(raw: string): URL | null {
 	const trimmed = (raw || "").trim();
@@ -316,11 +316,12 @@ export async function searchOnlineMonochromeIcons(query: string, limit = 96): Pr
 	try {
 		const url = `https://api.iconify.design/search?query=${encodeURIComponent(q)}&limit=${limit}&palette=false`;
 		const res = await requestUrl({ url, method: "GET" });
-		if (res.status === 200 && res.json && Array.isArray(res.json.icons)) {
-			return res.json.icons as string[];
+		const payload = res.json as { icons?: unknown } | undefined;
+		if (res.status === 200 && payload && Array.isArray(payload.icons)) {
+			return payload.icons as string[];
 		}
 	} catch {
-		// Ignorar errores de red
+		// Ignore errores de red
 	}
 	return [];
 }
@@ -344,7 +345,7 @@ export async function fetchIconifySvg(iconId: string): Promise<string | null> {
 			}
 		}
 	} catch {
-		// Ignorar
+		// Ignore
 	}
 	return null;
 }

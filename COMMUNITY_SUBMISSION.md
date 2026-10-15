@@ -1,63 +1,71 @@
-# Publicar Ribbon Bookmarks en el directorio comunitario
+# Publishing Ribbon Bookmarks to the community directory
 
-Repo: https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks
+Repository: https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks
 
-## Estado actual
+## Current state
 
-- [x] Repositorio público en GitHub
-- [x] `LICENSE` (MIT), `README.md` bilingüe, `manifest.json`, `versions.json`
-- [x] Sin telemetría, sin datos personales, sin `console.log`
-- [x] Sin dependencias de otros plugins (detecta y delega)
-- [x] GitHub Action de release en `.github/workflows/release.yml`
-- [x] Release publicado con `main.js`, `manifest.json` y `styles.css` adjuntos
+- [x] Public GitHub repository
+- [x] `LICENSE` (MIT), `README.md`, `manifest.json`, `versions.json`
+- [x] Clean run of Obsidian's official linters (`npm run lint`)
+- [x] No telemetry, no personal data, no `console` output
+- [x] No hard dependency on other plugins (they are detected and delegated to)
+- [x] `package-lock.json` committed so the build is reproducible
+- [x] GitHub Action that builds, attests provenance and publishes the release
 
-## Requisitos que valida la revisión de Obsidian
+## What the review validates
 
-| Requisito | Estado |
+| Requirement | Status |
 | --- | --- |
-| Repositorio público con `manifest.json` en la raíz | Cumplido |
-| `versions.json` con la versión actual | Cumplido |
-| Release cuyo tag coincida exactamente con `version` del manifest | Cumplido |
-| El release incluye `main.js`, `manifest.json` y `styles.css` | Cumplido |
-| `id` en kebab-case igual al nombre del plugin | `ribbon-bookmarks` |
-| La `description` no menciona "Obsidian" ni "plugin" | Cumplido |
-| Sin uso de APIs internas no documentadas sin respaldo | Cumplido (todo con `try/catch` y respaldo) |
-| Sin acceso a red salvo la búsqueda opcional de íconos | Cumplido |
+| Public repository with `manifest.json` at the root | Done |
+| `versions.json` containing the current version | Done |
+| Release tag matching `version` in the manifest exactly | Done |
+| The release ships `main.js`, `manifest.json` and `styles.css` | Done |
+| `id` in kebab-case matching the plugin folder name | `ribbon-bookmarks` |
+| The `description` avoids the words "Obsidian" and "plugin" | Done |
+| Only public APIs are used, with fallbacks | Done |
+| No network access except the optional icon search | Done |
+| Build provenance attestations for the release assets | Done |
 
-## Paso manual en el portal (lo hace Bryan)
+## Known review recommendations
 
-El envío ya no se hace por Pull Request. Se hace en el portal:
+These are advisory, not blocking:
 
-1. Entrar a **https://community.obsidian.md** con la cuenta de Obsidian.
-2. En el perfil, vincular la cuenta de GitHub (`bryanmongesolano`).
-3. En la barra lateral, ir a **Plugins** → **New plugin**.
-4. Pegar la URL del repositorio: `https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks`
-5. Aceptar las políticas de desarrollador y confirmar el soporte continuo del plugin.
-6. Enviar.
+- **Vault enumeration.** The file picker calls `vault.getFiles()` to let the user search their own files. It only runs while the user is typing a path in the new-item dialog.
+- **Broad network requests.** The online icon search contacts `api.iconify.design`, and the site logo lookup does the same. Both are user triggered.
 
-Después del envío:
+## Manual step in the portal (done by the maintainer)
 
-- Atender los comentarios de la revisión automática en el portal.
-- Esperar la revisión manual (normalmente varios días).
-- Una vez aprobado, el plugin se puede instalar desde **Settings → Community plugins → Browse**.
+Submissions are no longer made through a pull request; they go through the portal:
 
-## Publicar versiones futuras
+1. Sign in at **https://community.obsidian.md** with the Obsidian account.
+2. In the profile, link the GitHub account (`bryanmongesolano`).
+3. In the sidebar go to **Plugins** → **New plugin**.
+4. Paste the repository URL: `https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks`
+5. Accept the developer policies and confirm ongoing support.
+6. Submit.
 
-1. Subir `version` en `manifest.json` y agregar la entrada en `versions.json`.
-2. Subir la misma `version` en `package.json`.
-3. Compilar y desplegar en local:
+After submitting:
+
+- Address any automated review feedback in the portal, then publish a new release so it is scanned again.
+- Wait for the manual review, which usually takes a few days.
+- Once approved, the plugin can be installed from **Settings → Community plugins → Browse**.
+
+## Publishing future releases
+
+1. Bump `version` in `manifest.json`, `package.json` and add the matching entry to `versions.json`.
+2. Build and deploy locally:
 
 ```bash
 cd ~/Proyectos/obsidian-plugins/ribbon-bookmarks
-OBSIDIAN_VAULT_PLUGINS="<ruta-al-vault>/.obsidian/plugins" npm run deploy
+OBSIDIAN_VAULT_PLUGINS="<path-to-vault>/.obsidian/plugins" npm run deploy
 ```
 
-4. Commit y push a `main`.
-5. Crear y empujar el tag con la misma versión:
+3. Commit and push to `main`.
+4. Create and push the tag that matches the new version:
 
 ```bash
-git tag 1.2.1
-git push origin 1.2.1
+git tag 1.3.1
+git push origin 1.3.1
 ```
 
-La GitHub Action compila y adjunta `main.js`, `manifest.json` y `styles.css` al release automáticamente.
+The GitHub Action compiles the plugin, attaches `main.js`, `manifest.json` and `styles.css` to the release, and generates build provenance attestations.

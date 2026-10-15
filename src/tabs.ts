@@ -1,21 +1,21 @@
 import { App } from "obsidian";
 
 /**
- * Comportamiento de apertura de pestañas.
+ * Tab opening behavior.
  *
- * El plugin NO impone su propia política: lee dinámicamente la configuración que el usuario
- * ya tiene en Obsidian. Si el plugin comunitario "Open Tab Settings" está instalado y activo,
- * se respeta tal cual. Si no está instalado, se deja el comportamiento nativo de Obsidian
- * (abrir en la pestaña activa, reemplazando lo que se esté viendo).
+ * The plugin does not impose its own policy: it reads whatever the user already has
+ * configured in Obsidian. When the community plugin "Open Tab Settings" is installed and
+ * enabled it is respected as is. When it is not installed, Obsidian's native behavior is
+ * kept (open in the active tab, replacing whatever is being shown).
  */
 export interface TabBehavior {
-	/** Si true, abrir en una pestaña nueva; si false, en la pestaña activa. */
+	/** When true, open in a new tab; when false, in the active tab. */
 	openInNewTab: boolean;
-	/** Si true, cuando ya existe una pestaña con ese archivo/URL, enfocarla en vez de duplicar. */
+	/** When true, focus an existing tab for the same file or URL instead of duplicating it. */
 	deduplicateTabs: boolean;
-	/** Si true, la deduplicación también aplica entre paneles divididos. */
+	/** When true, deduplication also applies across split panes. */
 	deduplicateAcrossTabGroups: boolean;
-	/** Indica si la configuración provino de Open Tab Settings o del comportamiento nativo. */
+	/** Whether the configuration came from Open Tab Settings or from native behavior. */
 	source: "open-tab-settings" | "obsidian-default";
 }
 

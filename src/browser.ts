@@ -1,18 +1,18 @@
 import { App, WorkspaceLeaf } from "obsidian";
 
 /**
- * Adaptador de navegador. El plugin NO fija qué navegador usar: detecta en cascada cuál
- * está realmente activo en el Vault y delega en él. Si no hay ninguno, usa el navegador
- * externo del sistema.
+ * Browser adapter. The plugin never hardcodes which browser to use: it detects in a
+ * cascade which one is actually active in the vault and delegates to it. When none is
+ * available it falls back to the system browser.
  */
 export type BrowserKind = "surfing" | "webviewer" | "external";
 
 export interface BrowserAdapter {
 	kind: BrowserKind;
 	isExternal: boolean;
-	/** Abre la URL usando el motor del navegador detectado. */
+	/** Opens the URL using the detected browser engine. */
 	open: (app: App, url: string, newLeaf: boolean) => Promise<void>;
-	/** Busca una pestaña ya abierta con la misma URL, para poder enfocarla. */
+	/** Looks for an already open tab with the same URL so it can be focused. */
 	findOpenLeaf: (app: App, url: string) => WorkspaceLeaf | null;
 }
 
@@ -50,8 +50,7 @@ function findLeafByUrl(app: App, viewType: string, url: string): WorkspaceLeaf |
 	const target = normalizeUrl(url);
 	for (const leaf of app.workspace.getLeavesOfType(viewType)) {
 		const viewAny = leaf.view as unknown as { currentUrl?: string };
-		const stateUrl =
-			((leaf.getViewState()?.state as { url?: string } | undefined)?.url as string | undefined) || "";
+		const stateUrl = (leaf.getViewState()?.state as { url?: string } | undefined)?.url || "";
 		const current = viewAny?.currentUrl || stateUrl;
 		if (current && normalizeUrl(current) === target) {
 			return leaf;
@@ -73,7 +72,7 @@ const surfingAdapter: BrowserAdapter = {
 			active: true,
 			state: { url },
 		});
-		app.workspace.revealLeaf(leaf);
+		void app.workspace.revealLeaf(leaf);
 	},
 };
 
@@ -104,10 +103,10 @@ const externalAdapter: BrowserAdapter = {
 };
 
 /**
- * Detecta el navegador disponible siguiendo un orden en cascada:
- * 1) Surfing (plugin comunitario con motor Chromium y sesión persistente)
- * 2) Web viewer (plugin nativo de Obsidian)
- * 3) Navegador externo del sistema
+ * Detects the available browser following a cascade order:
+ * 1) Surfing (community plugin with a Chromium engine and persistent session)
+ * 2) Web viewer (Obsidian core plugin)
+ * 3) System default browser
  */
 export function detectBrowser(app: App): BrowserAdapter {
 	if (isPluginEnabled(app, "surfing")) return surfingAdapter;

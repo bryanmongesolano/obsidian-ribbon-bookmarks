@@ -6,8 +6,7 @@ import {
 	Notice,
 	Plugin,
 	PluginSettingTab,
-	Platform,
-	Setting,
+	SettingDefinitionItem,
 	TFile,
 	TFolder,
 	WorkspaceLeaf,
@@ -17,7 +16,7 @@ import {
 } from "obsidian";
 import { BrowserAdapter, detectBrowser } from "./browser";
 import { getLucideIconForFilePath, getOrRegisterItemIconId, resolveAutoIconForUrl } from "./icons";
-import { TFn, LangSetting, createTranslator, resolveLang } from "./i18n";
+import { TFn, createTranslator, resolveLang } from "./i18n";
 import { BookmarkItemModal } from "./modals";
 import { getTabBehavior } from "./tabs";
 import { CustomSavedIcon, RibbonBookmarkItem, RibbonBookmarksSettings, SavedOnlineIcon } from "./types";
@@ -53,6 +52,37 @@ interface RibbonLike {
 	ribbonItemsEl?: HTMLElement;
 	items?: Array<{ id: string; title: string; icon: string; hidden: boolean; buttonEl?: HTMLElement }>;
 	onContextMenu?: (evt: MouseEvent) => void;
+}
+
+interface ElectronShell {
+	openPath?: (path: string) => Promise<string>;
+}
+
+/**
+ * Returns the Electron shell when the plugin runs inside the desktop app. The renderer
+ * exposes `window.require`; on mobile it is undefined, so the caller falls back to
+ * notifying the user instead of opening the file.
+ */
+function getElectronShell(): ElectronShell | null {
+	const requireFn = (window as unknown as { require?: (moduleName: string) => unknown }).require;
+	if (typeof requireFn !== "function") return null;
+	try {
+		const electron = requireFn("electron") as { shell?: ElectronShell } | undefined;
+		return electron?.shell ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** Menu captured from Obsidian's own ribbon context menu while it is being built. */
+let pendingNativeRibbonMenu: Menu | null = null;
+
+function rememberNativeRibbonMenu(menu: Menu): void {
+	pendingNativeRibbonMenu = menu;
+}
+
+function getMenuItemTitleEl(item: unknown): HTMLElement | undefined {
+	return (item as { titleEl?: HTMLElement }).titleEl;
 }
 
 export default class RibbonBookmarksPlugin extends Plugin {
@@ -98,7 +128,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			try {
 				fn();
 			} catch {
-				// Ignorar
+				// Ignore
 			}
 		}
 		this.cleanupListeners = [];
@@ -118,8 +148,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData();
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		const loaded = (await this.loadData()) as Partial<RibbonBookmarksSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded ?? {});
 		if (!Array.isArray(this.settings.items)) this.settings.items = [];
 		if (!Array.isArray(this.settings.customIcons)) this.settings.customIcons = [];
 		if (!Array.isArray(this.settings.savedOnlineIcons)) this.settings.savedOnlineIcons = [];
@@ -168,7 +198,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	/* ==========================================================================
-	   Render del Ribbon
+	   Ribbon rendering
 	   ========================================================================== */
 
 	private clearRibbonElements(): void {
@@ -215,7 +245,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				if (evt.button === 1 && item.type !== "separator" && item.type !== "folder") {
 					evt.preventDefault();
 					evt.stopPropagation();
-					this.openBookmarkItem(item, true);
+					void this.openBookmarkItem(item, true);
 				}
 			});
 
@@ -284,16 +314,16 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			return;
 		}
 		this.closeAllFolderPopups();
-		this.openBookmarkItem(item, evt.metaKey);
+		void this.openBookmarkItem(item, evt.metaKey);
 	}
 
 	/* ==========================================================================
-	   Apertura de enlaces y archivos
+	   Opening links and files
 	   ========================================================================== */
 
-	private focusLeaf(leaf: WorkspaceLeaf): void {
+	private async focusLeaf(leaf: WorkspaceLeaf): Promise<void> {
 		this.app.workspace.setActiveLeaf(leaf, { focus: true });
-		this.app.workspace.revealLeaf(leaf);
+		await this.app.workspace.revealLeaf(leaf);
 	}
 
 	public async openBookmarkItem(item: RibbonBookmarkItem, forceNewTab = false): Promise<void> {
@@ -315,7 +345,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			if (!forceNewTab && tabCfg.deduplicateTabs && !browser.isExternal) {
 				const existing = browser.findOpenLeaf(this.app, targetUrl);
 				if (existing) {
-					this.focusLeaf(existing);
+					void this.focusLeaf(existing);
 					return;
 				}
 			}
@@ -333,7 +363,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				if (!forceNewTab && tabCfg.deduplicateTabs) {
 					const existing = this.findExistingFileLeaf(abstractFile.path, tabCfg.deduplicateAcrossTabGroups);
 					if (existing) {
-						this.focusLeaf(existing);
+						void this.focusLeaf(existing);
 						return;
 					}
 				}
@@ -347,24 +377,17 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			if (abstractFile instanceof TFolder) {
 				const explorerLeaf = this.app.workspace.getLeavesOfType("file-explorer")[0];
 				if (explorerLeaf) {
-					this.app.workspace.revealLeaf(explorerLeaf);
+					void this.app.workspace.revealLeaf(explorerLeaf);
 					const view = explorerLeaf.view as unknown as { revealInFolder?: (f: TFolder) => void };
 					view.revealInFolder?.(abstractFile);
 				}
 				return;
 			}
 
-			try {
-				if (Platform.isDesktopApp) {
-					// eslint-disable-next-line @typescript-eslint/no-var-requires
-					const electron = require("electron");
-					if (electron?.shell?.openPath) {
-						await electron.shell.openPath(cleanPath);
-						return;
-					}
-				}
-			} catch {
-				// Ignorar
+			const shell = getElectronShell();
+			if (shell?.openPath) {
+				await shell.openPath(cleanPath);
+				return;
 			}
 			new Notice(this.t("noticeFileNotFound", { path: cleanPath }));
 		}
@@ -386,7 +409,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	/* ==========================================================================
-	   Popups de carpetas (con listeners bajo demanda y límites en caché)
+	   Folder popups (on-demand listeners and cached bounds)
 	   ========================================================================== */
 
 	private ensurePopupWatchersAttached(): void {
@@ -399,7 +422,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			if (target.closest(".rb-folder-popup") || target.closest(".menu") || target.closest(".modal-container")) {
 				return;
 			}
-			const ribbonBtn = target.closest(".rb-ribbon-folder") as HTMLElement | null;
+			const ribbonBtn = target.closest(".rb-ribbon-folder");
 			if (ribbonBtn && evt.button === 0 && ribbonBtn.getAttribute("data-rb-id") === this.openPopups[0]?.folder.id) {
 				return;
 			}
@@ -598,7 +621,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					return;
 				}
 				this.closeAllFolderPopups();
-				this.openBookmarkItem(child, evt.metaKey);
+				void this.openBookmarkItem(child, evt.metaKey);
 			});
 
 			row.addEventListener("auxclick", (evt: MouseEvent) => {
@@ -606,7 +629,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					evt.preventDefault();
 					evt.stopPropagation();
 					this.closeAllFolderPopups();
-					this.openBookmarkItem(child, true);
+					void this.openBookmarkItem(child, true);
 				}
 			});
 
@@ -621,23 +644,27 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		}
 
 		const rect = anchorEl.getBoundingClientRect();
-		popupEl.style.position = "fixed";
-		popupEl.style.left = `${Math.round(rect.right + 6)}px`;
-		popupEl.style.top = `${Math.round(rect.top)}px`;
-		popupEl.style.zIndex = `${65 + level}`;
+		popupEl.setCssStyles({
+			position: "fixed",
+			left: `${Math.round(rect.right + 6)}px`,
+			top: `${Math.round(rect.top)}px`,
+			zIndex: `${65 + level}`,
+		});
 
 		this.openPopups.push({ folder, level, el: popupEl, anchorEl, rowEls });
 
 		const popupRect = popupEl.getBoundingClientRect();
 		if (popupRect.bottom > window.innerHeight - 8) {
-			popupEl.style.top = `${Math.max(8, Math.round(window.innerHeight - popupRect.height - 8))}px`;
+			popupEl.setCssStyles({
+				top: `${Math.max(8, Math.round(window.innerHeight - popupRect.height - 8))}px`,
+			});
 		}
 
 		this.recomputeOpenFolderZoneBounds();
 	}
 
 	/* ==========================================================================
-	   Menús contextuales
+	   Context menus
 	   ========================================================================== */
 
 	private showItemContextMenu(item: RibbonBookmarkItem, containerList: RibbonBookmarkItem[], evt: MouseEvent): void {
@@ -657,7 +684,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					.setIcon("external-link")
 					.onClick(() => {
 						this.closeAllFolderPopups();
-						this.openBookmarkItem(item, true);
+						void this.openBookmarkItem(item, true);
 					})
 			);
 			if (item.type === "url" && item.url) {
@@ -705,23 +732,25 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		const ribbon = this.leftRibbon;
 		if (!ribbon?.containerEl || typeof ribbon.onContextMenu !== "function") return null;
 
-		let captured: Menu | null = null;
 		const menuProto = Menu.prototype as unknown as { showAtMouseEvent: (e: MouseEvent) => Menu };
 		const origShow = menuProto.showAtMouseEvent;
 		menuProto.showAtMouseEvent = function (this: Menu) {
-			captured = this;
+			rememberNativeRibbonMenu(this);
 			return this;
 		};
 
+		pendingNativeRibbonMenu = null;
 		try {
 			const proxyEvt = Object.create(evt, { target: { value: ribbon.containerEl } }) as MouseEvent;
 			ribbon.onContextMenu(proxyEvt);
 		} catch {
-			// Ignorar
+			// Ignore
 		} finally {
 			menuProto.showAtMouseEvent = origShow;
 		}
 
+		const captured = pendingNativeRibbonMenu;
+		pendingNativeRibbonMenu = null;
 		return captured;
 	}
 
@@ -746,14 +775,11 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			this.closeAllFolderPopups();
 
 			const nativeMenu = this.captureNativeRibbonMenu(evt);
-			const nativeItems: MenuItem[] = nativeMenu
-				? (((nativeMenu as unknown as { items?: Array<MenuItem | unknown> }).items || []).filter(
-						(x) => Boolean((x as unknown as { titleEl?: HTMLElement }).titleEl)
-				  ) as MenuItem[])
-				: [];
+			const nativeMenuItems = nativeMenu ? (nativeMenu as unknown as { items?: unknown[] }).items ?? [] : [];
+			const nativeItems = nativeMenuItems.filter((item) => Boolean(getMenuItemTitleEl(item))) as MenuItem[];
 
 			for (const natItem of nativeItems) {
-				const titleEl = (natItem as unknown as { titleEl?: HTMLElement }).titleEl;
+				const titleEl = getMenuItemTitleEl(natItem);
 				const text = titleEl?.getText?.() || "";
 				if (text.startsWith("rb-item-")) {
 					const found = this.findItemByIdRecursive(this.settings.items, text.slice("rb-item-".length));
@@ -913,16 +939,19 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			this.renderRibbonItems();
 		};
 
+		const onGlobalDropHandler = (evt: DragEvent): void => {
+			void onGlobalDrop(evt);
+		};
 		window.addEventListener("dragover", onGlobalDragOver, true);
-		window.addEventListener("drop", onGlobalDrop, true);
+		window.addEventListener("drop", onGlobalDropHandler, true);
 		this.cleanupListeners.push(() => {
 			window.removeEventListener("dragover", onGlobalDragOver, true);
-			window.removeEventListener("drop", onGlobalDrop, true);
+			window.removeEventListener("drop", onGlobalDropHandler, true);
 		});
 	}
 
 	/* ==========================================================================
-	   Arrastre interno (reordenar, agrupar, anidar)
+	   Internal drag and drop (reorder, group, nest)
 	   ========================================================================== */
 
 	private ensureDropBarEl(): HTMLElement {
@@ -935,9 +964,11 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 	private showPurpleDropLine(x: number, y: number, width: number): void {
 		const el = this.ensureDropBarEl();
-		el.style.left = `${Math.round(x)}px`;
-		el.style.top = `${Math.round(y - 2)}px`;
-		el.style.width = `${Math.round(width)}px`;
+		el.setCssStyles({
+			left: `${Math.round(x)}px`,
+			top: `${Math.round(y - 2)}px`,
+			width: `${Math.round(width)}px`,
+		});
 		el.show();
 	}
 
@@ -1123,8 +1154,10 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 				moveEvt.preventDefault();
 				if (ghostEl) {
-					ghostEl.style.left = `${moveEvt.clientX + 12}px`;
-					ghostEl.style.top = `${moveEvt.clientY - 12}px`;
+					ghostEl.setCssStyles({
+						left: `${moveEvt.clientX + 12}px`,
+						top: `${moveEvt.clientY - 12}px`,
+					});
 				}
 
 				lastHit = this.findDropTargetAtPoint(moveEvt.clientX, moveEvt.clientY, sourceItem.id);
@@ -1133,7 +1166,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 			const onMouseUp = async (upEvt: MouseEvent) => {
 				window.removeEventListener("mousemove", onMouseMove, true);
-				window.removeEventListener("mouseup", onMouseUp, true);
+				window.removeEventListener("mouseup", onMouseUpHandler, true);
 				el.removeClass("rb-is-dragging-source");
 				if (ghostEl) {
 					ghostEl.remove();
@@ -1161,8 +1194,11 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				await this.executeMoveOrGroup(sourceItem, sourceContainerList, lastHit);
 			};
 
+			const onMouseUpHandler = (evt: MouseEvent): void => {
+				void onMouseUp(evt);
+			};
 			window.addEventListener("mousemove", onMouseMove, true);
-			window.addEventListener("mouseup", onMouseUp, true);
+			window.addEventListener("mouseup", onMouseUpHandler, true);
 		};
 
 		el.addEventListener("mousedown", onMouseDown, true);
@@ -1217,12 +1253,12 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		const workspace = this.app.workspace as unknown as {
 			onDragLeaf?: (evt: DragEvent, leaf: WorkspaceLeaf) => void;
 		};
-		if (typeof workspace.onDragLeaf !== "function") return;
+		const originalOnDragLeaf = workspace.onDragLeaf;
+		if (typeof originalOnDragLeaf !== "function") return;
 
-		const original = workspace.onDragLeaf.bind(workspace);
-		workspace.onDragLeaf = (evt: DragEvent, leaf: WorkspaceLeaf) => {
+		workspace.onDragLeaf = (evt: DragEvent, leaf: WorkspaceLeaf): void => {
 			this.activeDraggedLeaf = leaf;
-			const clearLeaf = () => {
+			const clearLeaf = (): void => {
 				window.setTimeout(() => {
 					this.activeDraggedLeaf = null;
 					this.setDraggingMode(false);
@@ -1230,15 +1266,15 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			};
 			window.addEventListener("dragend", clearLeaf, { once: true, capture: true });
 			window.addEventListener("drop", clearLeaf, { once: true, capture: false });
-			return original(evt, leaf);
+			originalOnDragLeaf.call(workspace, evt, leaf);
 		};
 		this.cleanupListeners.push(() => {
-			workspace.onDragLeaf = original;
+			workspace.onDragLeaf = originalOnDragLeaf;
 		});
 	}
 
 	/* ==========================================================================
-	   Extracción de lo que se suelta sobre la barra
+	   Extracting whatever is dropped onto the ribbon
 	   ========================================================================== */
 
 	private async extractDroppedBookmarkItems(evt: DragEvent): Promise<RibbonBookmarkItem[]> {
@@ -1258,7 +1294,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			if (viewType === "surfing-view" || viewType === "webviewer") {
 				const url =
 					viewAny.currentUrl ||
-					((viewState.state as { url?: string } | undefined)?.url as string | undefined) ||
+					(viewState.state as { url?: string } | undefined)?.url ||
 					"";
 				if (url) {
 					const title = viewAny.currentTitle || viewAny.getDisplayText?.() || url;
@@ -1432,7 +1468,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					candidateTitle = (a.textContent || "").trim();
 				}
 			} catch {
-				// Ignorar
+				// Ignore
 			}
 		}
 
@@ -1466,7 +1502,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					}
 				}
 			} catch {
-				// Ignorar
+				// Ignore
 			}
 		}
 
@@ -1495,7 +1531,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	/* ==========================================================================
-	   Modales
+	   Modals
 	   ========================================================================== */
 
 	public openAddModal(insertIndex?: number): void {
@@ -1549,6 +1585,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 }
 
+/** Settings use Obsidian's declarative API so they also show up in the settings search. */
 class RibbonBookmarksSettingTab extends PluginSettingTab {
 	plugin: RibbonBookmarksPlugin;
 
@@ -1557,29 +1594,37 @@ class RibbonBookmarksSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	display(): void {
-		const { containerEl } = this;
+	getSettingDefinitions(): SettingDefinitionItem[] {
 		const t = this.plugin.t;
-		containerEl.empty();
+		return [
+			{
+				name: t("settingsLanguage"),
+				desc: t("settingsLanguageDesc"),
+				control: {
+					type: "dropdown",
+					key: "language",
+					defaultValue: "auto",
+					options: {
+						auto: t("settingsLangAuto"),
+						es: t("langEs"),
+						en: t("langEn"),
+					},
+				},
+			},
+		];
+	}
 
-		containerEl.createEl("h2", { text: t("settingsTitle") });
+	getControlValue(key: string): unknown {
+		if (key === "language") return this.plugin.settings.language;
+		return undefined;
+	}
 
-		new Setting(containerEl)
-			.setName(t("settingsLanguage"))
-			.setDesc(t("settingsLanguageDesc"))
-			.addDropdown((dd) =>
-				dd
-					.addOption("auto", t("settingsLangAuto"))
-					.addOption("es", t("langEs"))
-					.addOption("en", t("langEn"))
-					.setValue(this.plugin.settings.language)
-					.onChange(async (val) => {
-						this.plugin.settings.language = val as LangSetting;
-						await this.plugin.saveSettings();
-						this.plugin.refreshTranslator();
-						this.plugin.renderRibbonItems();
-						this.display();
-					})
-			);
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key !== "language") return;
+		if (value !== "auto" && value !== "es" && value !== "en") return;
+		this.plugin.settings.language = value;
+		await this.plugin.saveSettings();
+		this.plugin.refreshTranslator();
+		this.plugin.renderRibbonItems();
 	}
 }

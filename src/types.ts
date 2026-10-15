@@ -19,26 +19,26 @@ export interface RibbonBookmarkItem {
 	id: string;
 	type: BookmarkItemType;
 	title: string;
-	/** Para type === "url" */
+	/** For type === "url" */
 	url?: string;
-	/** Para type === "file" (ruta relativa al Vault o ruta absoluta) */
+	/** For type === "file" (vault-relative or absolute path) */
 	filePath?: string;
-	/** Origen del ícono */
+	/** Icon source */
 	iconSource: IconSourceType;
-	/** Nombre del ícono de Lucide / Obsidian (ej. "file", "folder", "video") */
+	/** Lucide / Obsidian icon name (e.g. "file", "folder", "video") */
 	lucideIcon?: string;
-	/** SVG monocromático plano adaptado a la convención de Obsidian */
+	/** Flat monochrome SVG adapted to Obsidian's icon convention */
 	customSvg?: string;
-	/** Clave de Iconify (ej. "simple-icons:googledrive") cuando el ícono vino de la búsqueda en internet */
+	/** Iconify key (e.g. "simple-icons:googledrive") when the icon came from the online search */
 	onlineIconKey?: string;
-	/** Para type === "folder": elementos hijos (soporta carpetas anidadas) */
+	/** For type === "folder": child items (nested folders are supported) */
 	children?: RibbonBookmarkItem[];
 }
 
 export interface RibbonBookmarksSettings {
 	items: RibbonBookmarkItem[];
 	customIcons: CustomSavedIcon[];
-	/** Íconos obtenidos de la búsqueda en internet, para reutilizarlos */
+	/** Icons obtained from the online search, kept for reuse */
 	savedOnlineIcons: SavedOnlineIcon[];
 	language: LangSetting;
 }
