@@ -120,24 +120,27 @@ export class BookmarkItemModal extends Modal {
 				});
 		});
 
-		// Tipo de elemento y origen: solo al crear un ítem nuevo (nunca al modificar)
-		if (this.isNew && !isFolder) {
-			this.createSettingWithHelp(contentEl, this.t("fieldType"), this.t("helpType")).addDropdown((dd) => {
-				dd.addOption("url", this.t("optionUrl"))
-					.addOption("file", this.t("optionFile"))
-					.setValue(this.draft.type === "file" ? "file" : "url")
-					.onChange((val: "url" | "file") => {
-						this.draft.type = val;
-						if (val === "file" && this.draft.iconSource === "auto") {
-							this.draft.lucideIcon = getLucideIconForFilePath(this.draft.filePath || "");
-						}
-						this.render();
-					});
-			});
+		// Tipo de elemento: solo al crear. El campo de valor se muestra siempre
+		if (!isFolder) {
+			if (this.isNew) {
+				this.createSettingWithHelp(contentEl, this.t("fieldType"), this.t("helpType")).addDropdown((dd) => {
+					dd.addOption("url", this.t("optionUrl"))
+						.addOption("file", this.t("optionFile"))
+						.setValue(this.draft.type === "file" ? "file" : "url")
+						.onChange((val: "url" | "file") => {
+							this.draft.type = val;
+							if (val === "file" && this.draft.iconSource === "auto") {
+								this.draft.lucideIcon = getLucideIconForFilePath(this.draft.filePath || "");
+							}
+							this.render();
+						});
+				});
+			}
 
 			if (this.draft.type === "url") {
+				// La URL siempre es editable, tanto al crear como al modificar
 				this.renderUrlFields(contentEl);
-			} else if (this.draft.type === "file") {
+			} else if (this.isNew && this.draft.type === "file") {
 				this.renderFileFields(contentEl);
 			}
 		}
@@ -395,7 +398,9 @@ export class BookmarkItemModal extends Modal {
 	}
 
 	private renderLucideIconsTab(container: HTMLElement): void {
-		const searchInput = container.createEl("input", {
+		// Misma estructura y espaciado que la barra de "Buscar en internet"
+		const bar = container.createDiv({ cls: "rb-internet-search-bar" });
+		const searchInput = bar.createEl("input", {
 			type: "text",
 			placeholder: this.t("iconSearchPlaceholder"),
 			cls: "rb-icon-search-input",

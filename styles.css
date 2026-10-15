@@ -144,11 +144,27 @@ body.rb-is-dragging .tooltip {
 	padding: 0;
 }
 
-/* Sin líneas separadoras entre los campos del modal */
+/* Sin líneas separadoras entre los campos y con espaciado vertical minimo */
 .modal.rb-bookmark-modal .setting-item {
 	border-top: none !important;
 	border-bottom: none !important;
-	padding: 5px 0;
+	padding: 2px 0 !important;
+	min-height: 0;
+	align-items: center;
+}
+
+.modal.rb-bookmark-modal .setting-item-info {
+	margin: 0;
+}
+
+.modal.rb-bookmark-modal .setting-item-name,
+.modal.rb-bookmark-modal .setting-item-description {
+	margin: 0;
+}
+
+.modal.rb-bookmark-modal .setting-item-control {
+	min-height: 0;
+	margin: 0;
 }
 
 /* Campos de texto amplios e iguales para Nombre, URL y Archivo */
@@ -325,6 +341,12 @@ body.rb-is-dragging .tooltip {
 .rb-icon-cell-svg svg {
 	width: 18px;
 	height: 18px;
+}
+
+.rb-icon-search-input {
+	width: 100%;
+	box-sizing: border-box;
+	margin-bottom: 0;
 }
 
 .rb-internet-search-bar {
