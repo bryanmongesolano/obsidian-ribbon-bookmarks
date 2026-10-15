@@ -413,7 +413,7 @@ export class BookmarkItemModal extends Modal {
 		const renderGrid = (query: string) => {
 			grid.empty();
 			const q = query.toLowerCase().trim();
-			const filtered = (q ? allIcons.filter((id) => id.toLowerCase().includes(q)) : allIcons).slice(0, 96);
+			const filtered = q ? allIcons.filter((id) => id.toLowerCase().includes(q)) : allIcons;
 			for (const iconName of filtered) {
 				const cell = grid.createDiv({
 					cls:
