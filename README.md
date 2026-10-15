@@ -1,6 +1,13 @@
+[![Downloads](https://img.shields.io/github/downloads/bryanmongesolano/obsidian-ribbon-bookmarks/total?style=for-the-badge&logo=obsidian&color=7c3aed)](https://community.obsidian.md/plugins/ribbon-bookmarks)
+[![Release](https://img.shields.io/github/v/release/bryanmongesolano/obsidian-ribbon-bookmarks?style=for-the-badge)](https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks/releases)
+[![License](https://img.shields.io/github/license/bryanmongesolano/obsidian-ribbon-bookmarks?style=for-the-badge)](LICENSE)
+[![Review](https://img.shields.io/badge/review-passed-22c55e?style=for-the-badge)](https://community.obsidian.md/plugins/ribbon-bookmarks)
+
 # Ribbon Bookmarks
 
 A bookmark bar inside the left ribbon of Obsidian: web links, any kind of file, nested folders, separators, drag and drop, and flat monochrome icons.
+
+![Ribbon Bookmarks](assets/social-preview.png)
 
 ## Features
 
@@ -16,14 +23,27 @@ A bookmark bar inside the left ribbon of Obsidian: web links, any kind of file, 
 
 ### From the community directory
 
+[![Install Ribbon Bookmarks](https://img.shields.io/badge/Install-Ribbon%20Bookmarks-7c3aed?style=for-the-badge)](https://obsidian.md/plugins?id=ribbon-bookmarks)
+
+Or, from inside the app:
+
 1. Open **Settings → Community plugins**.
 2. Turn off **Restricted mode** if needed, then **Browse**.
 3. Search for **Ribbon Bookmarks** and install it.
 4. Enable it and reload.
 
+### Via BRAT (useful before the directory listing goes live)
+
+1. Install the community plugin [BRAT](https://github.com/TfTHacker/obsidian42-brat).
+2. Run the command **BRAT: Add a beta plugin for testing**.
+3. Enter `bryanmongesolano/obsidian-ribbon-bookmarks`.
+4. Enable **Ribbon Bookmarks** in **Settings → Community plugins**.
+
+BRAT keeps it updated from the GitHub releases automatically.
+
 ### Manual
 
-1. Download `main.js`, `manifest.json` and `styles.css` from the latest release.
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks/releases/latest).
 2. Create `.obsidian/plugins/ribbon-bookmarks/` in your vault and place the three files there.
 3. Enable the plugin in **Settings → Community plugins**.
 
