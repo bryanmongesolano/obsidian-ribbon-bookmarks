@@ -38,7 +38,7 @@ export class BookmarkItemModal extends Modal {
 	private onSaveOnlineIconCb: (icon: SavedOnlineIcon) => Promise<void> | void;
 	private onSubmitCb: (result: RibbonBookmarkItem) => Promise<void> | void;
 	private onDeleteCb?: (item: RibbonBookmarkItem) => Promise<void> | void;
-	private activeIconTab: "custom" | "lucide" | "internet" = "custom";
+	private activeIconTab: "icons" | "internet" = "icons";
 	private iconPreviewBoxEl: HTMLElement | null = null;
 	private iconPickerWrapperEl: HTMLElement | null = null;
 	/** Si el usuario eligió el ícono a mano, se deja de autodetectar por URL o ruta */
@@ -71,13 +71,7 @@ export class BookmarkItemModal extends Modal {
 		}
 
 		// Si el ícono vino de la búsqueda en internet, se abre directamente esa pestaña
-		if (this.draft.iconSource === "online") {
-			this.activeIconTab = "internet";
-		} else if (this.draft.iconSource === "lucide" || this.draft.type === "folder" || this.draft.type === "file") {
-			this.activeIconTab = "lucide";
-		} else {
-			this.activeIconTab = "custom";
-		}
+		this.activeIconTab = this.draft.iconSource === "online" ? "internet" : "icons";
 	}
 
 	onOpen(): void {
@@ -240,7 +234,7 @@ export class BookmarkItemModal extends Modal {
 		this.draft.lucideIcon = lucideIcon;
 		this.draft.onlineIconKey = onlineKey;
 
-		const newTab = source === "online" ? "internet" : source === "custom-svg" ? "custom" : "lucide";
+		const newTab = source === "online" ? "internet" : "icons";
 		const sameTab =
 			this.activeIconTab === newTab && this.iconPickerWrapperEl?.getAttribute("data-rb-tab") === newTab;
 		this.activeIconTab = newTab;
@@ -439,9 +433,8 @@ export class BookmarkItemModal extends Modal {
 		this.updateIconPreview();
 
 		const tabsBar = topBar.createDiv({ cls: "rb-icon-tabs-bar" });
-		const tabs: Array<{ id: "custom" | "lucide" | "internet"; label: string }> = [
-			{ id: "custom", label: this.t("tabCustom") },
-			{ id: "lucide", label: this.t("tabLucide") },
+		const tabs: Array<{ id: "icons" | "internet"; label: string }> = [
+			{ id: "icons", label: this.t("tabIcons") },
 			{ id: "internet", label: this.t("tabOnline") },
 		];
 
@@ -458,16 +451,22 @@ export class BookmarkItemModal extends Modal {
 
 		const tabBody = wrapper.createDiv({ cls: "rb-icon-tab-body" });
 
-		if (this.activeIconTab === "custom") {
-			this.renderCustomIconsTab(tabBody);
-		} else if (this.activeIconTab === "lucide") {
-			this.renderLucideIconsTab(tabBody);
-		} else {
+		if (this.activeIconTab === "internet") {
 			this.renderInternetSearchTab(tabBody);
+		} else {
+			this.renderIconsTab(tabBody);
 		}
 	}
 
-	private renderCustomIconsTab(container: HTMLElement): void {
+	/** Pestaña única de íconos: los cargados, las marcas integradas y toda la librería de Lucide. */
+	private renderIconsTab(container: HTMLElement): void {
+		const bar = container.createDiv({ cls: "rb-internet-search-bar" });
+		const searchInput = bar.createEl("input", {
+			type: "text",
+			placeholder: this.t("iconSearchPlaceholder"),
+			cls: "rb-icon-search-input",
+		});
+
 		const grid = container.createDiv({ cls: "rb-icon-grid" });
 
 		// Primer cuadro: "+" para cargar un SVG desde el dispositivo
@@ -546,51 +545,19 @@ export class BookmarkItemModal extends Modal {
 			};
 		}
 
-		// El botón "+" siempre va primero; el ícono en uso queda justo después
-		const selected = grid.querySelector(".rb-icon-cell.is-selected") as HTMLElement | null;
-		if (selected) {
-			addCell.insertAdjacentElement("afterend", selected);
-		}
-	}
-
-	private renderLucideIconsTab(container: HTMLElement): void {
-		// Misma estructura y espaciado que la barra de "Buscar en internet"
-		const bar = container.createDiv({ cls: "rb-internet-search-bar" });
-		const searchInput = bar.createEl("input", {
-			type: "text",
-			placeholder: this.t("iconSearchPlaceholder"),
-			cls: "rb-icon-search-input",
-		});
-
-		const grid = container.createDiv({ cls: "rb-icon-grid" });
+		// Toda la librería de Lucide, filtrable, a continuación de los íconos cargados
 		const allIcons = getAllObsidianLucideIcons();
 
-		// Ícono de Lucide que el ítem está usando actualmente (si lo hay)
-		const getCurrentIcon = (): string =>
-			(this.draft.iconSource === "lucide" || this.draft.iconSource === "auto") && this.draft.lucideIcon
-				? this.draft.lucideIcon
-				: "";
-
-		const renderGrid = (query: string) => {
-			grid.empty();
+		const renderLucideCells = (query: string) => {
+			grid.querySelectorAll('[data-rb-kind="lucide"]').forEach((c) => c.remove());
 			const q = query.toLowerCase().trim();
 			const filtered = q ? allIcons.filter((id) => id.toLowerCase().includes(q)) : allIcons;
-			const current = getCurrentIcon();
-
-			// El ícono en uso va siempre primero y queda marcado
-			let ordered = filtered;
-			if (current) {
-				const rest = filtered.filter((id) => id !== current);
-				if (!q || filtered.includes(current)) {
-					ordered = [current, ...rest];
-				}
-			}
-
-			for (const iconName of ordered) {
+			for (const iconName of filtered) {
 				const cell = grid.createDiv({
-					cls: "rb-icon-cell" + (iconName === current ? " is-selected" : ""),
+					cls: "rb-icon-cell",
 					attr: { "aria-label": iconName },
 				});
+				cell.setAttribute("data-rb-kind", "lucide");
 				const iconSpan = cell.createDiv({ cls: "rb-icon-cell-svg" });
 				setIcon(iconSpan, iconName);
 				cell.onclick = () => {
@@ -598,14 +565,23 @@ export class BookmarkItemModal extends Modal {
 					this.draft.iconSource = "lucide";
 					this.draft.lucideIcon = iconName;
 					this.draft.customSvg = undefined;
+					this.draft.onlineIconKey = undefined;
 					this.updateIconPreview();
-					renderGrid(searchInput.value);
+					grid.querySelectorAll(".rb-icon-cell").forEach((c) => c.removeClass("is-selected"));
+					cell.addClass("is-selected");
+					addCell.insertAdjacentElement("afterend", cell);
 				};
 			}
 		};
 
-		searchInput.addEventListener("input", () => renderGrid(searchInput.value));
-		renderGrid(searchInput.value);
+		renderLucideCells("");
+		searchInput.addEventListener("input", () => renderLucideCells(searchInput.value));
+
+		// El botón "+" siempre va primero; el ícono en uso queda justo después
+		const selected = grid.querySelector(".rb-icon-cell.is-selected") as HTMLElement | null;
+		if (selected) {
+			addCell.insertAdjacentElement("afterend", selected);
+		}
 	}
 
 	private renderInternetSearchTab(container: HTMLElement): void {
