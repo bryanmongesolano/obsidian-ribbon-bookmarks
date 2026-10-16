@@ -1,6 +1,7 @@
 [![Release](https://img.shields.io/github/v/release/bryanmongesolano/obsidian-ribbon-bookmarks?style=for-the-badge)](https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks/releases)
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22ribbon-bookmarks%22%5D.downloads&label=downloads&style=for-the-badge&logo=obsidian&color=7c3aed)](https://community.obsidian.md/plugins/ribbon-bookmarks)
 [![License](https://img.shields.io/badge/license-MIT-7c3aed?style=for-the-badge)](LICENSE)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-donate-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/bryanmonge)
 
 ![Ribbon Bookmarks](assets/social-preview.png)
 
@@ -78,3 +79,9 @@ OBSIDIAN_VAULT_PLUGINS="/path/to/vault/.obsidian/plugins" npm run deploy
 ## License
 
 [MIT](LICENSE)
+
+## Support
+
+Ribbon Bookmarks is free and open source. If it earns a place in your sidebar, you can support its development:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-donate-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/bryanmonge)

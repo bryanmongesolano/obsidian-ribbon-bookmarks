@@ -1,10 +1,11 @@
 {
   "id": "ribbon-bookmarks",
   "name": "Ribbon Bookmarks",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "minAppVersion": "1.13.0",
   "description": "Everything you reach for often, one click away in the left sidebar: web links, any file, nested folders and drag and drop.",
   "author": "Bryan Monge",
   "authorUrl": "https://github.com/bryanmongesolano",
+  "fundingUrl": "https://ko-fi.com/bryanmonge",
   "isDesktopOnly": false
 }
