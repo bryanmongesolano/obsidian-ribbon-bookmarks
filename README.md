@@ -1,10 +1,20 @@
 [![Release](https://img.shields.io/github/v/release/bryanmongesolano/obsidian-ribbon-bookmarks?style=for-the-badge)](https://github.com/bryanmongesolano/obsidian-ribbon-bookmarks/releases)
-[![Downloads](https://img.shields.io/github/downloads/bryanmongesolano/obsidian-ribbon-bookmarks/total?style=for-the-badge&logo=obsidian&color=7c3aed)](https://community.obsidian.md/plugins/ribbon-bookmarks)
+[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22ribbon-bookmarks%22%5D.downloads&label=downloads&style=for-the-badge&logo=obsidian&color=7c3aed)](https://community.obsidian.md/plugins/ribbon-bookmarks)
 [![License](https://img.shields.io/badge/license-MIT-7c3aed?style=for-the-badge)](LICENSE)
 
 ![Ribbon Bookmarks](assets/social-preview.png)
 
 Everything you reach for often, one click away in the left sidebar.
+
+## Screenshots
+
+![A pinned web link showing its name on hover](screenshots/web-link.png)
+
+![A folder open in a cascading side menu](screenshots/folders.png)
+
+![Right-click menu to add items and separators](screenshots/add-menu.png)
+
+![Icon picker with monochrome icons](screenshots/icon-picker.png)
 
 ## Features
 
