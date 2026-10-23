@@ -44,11 +44,18 @@ Everything you reach for often, one click away in the left sidebar.
 | --- | --- |
 | Left click | Opens the item |
 | Middle click | Opens it in a new tab |
+| Ctrl/Cmd + left click | Opens it in a new tab |
+| Ctrl/Cmd + Alt + left click | Opens it in a split pane |
+| Ctrl/Cmd + Alt + Shift + left click | Opens it in a new window |
 | Left click a folder | Shows its contents |
+| Ctrl/Cmd + left click a folder | Opens its items in new tabs |
+| Middle click a folder | Opens its items in new tabs |
 | Right click the ribbon | Add an item or a separator, plus the native ribbon options |
 | Right click an item | Open in new tab, open externally, modify, delete |
 | Drag onto another item | Groups them into a folder |
 | Drag between two items | Reorders, with a line showing where it will land |
+
+Opening a folder this way only takes its direct items, as tabs: nested folders and separators are skipped, and it never opens a split or a window.
 
 ## Settings
 

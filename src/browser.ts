@@ -1,4 +1,4 @@
-import { App, WorkspaceLeaf } from "obsidian";
+import { App, PaneType, WorkspaceLeaf } from "obsidian";
 
 /**
  * Browser adapter. The plugin never hardcodes which browser to use: it detects in a
@@ -11,7 +11,7 @@ export interface BrowserAdapter {
 	kind: BrowserKind;
 	isExternal: boolean;
 	/** Opens the URL using the detected browser engine. */
-	open: (app: App, url: string, newLeaf: boolean) => Promise<void>;
+	open: (app: App, url: string, newLeaf: PaneType | boolean, active?: boolean) => Promise<void>;
 	/** Looks for an already open tab with the same URL so it can be focused. */
 	findOpenLeaf: (app: App, url: string) => WorkspaceLeaf | null;
 }
@@ -63,16 +63,16 @@ const surfingAdapter: BrowserAdapter = {
 	kind: "surfing",
 	isExternal: false,
 	findOpenLeaf: (app, url) => findLeafByUrl(app, SURFING_VIEW_TYPE, url),
-	open: async (app, url, newLeaf) => {
-		const leaf = newLeaf
-			? app.workspace.getLeaf("tab")
+	open: async (app, url, newLeaf, active = true) => {
+		const leaf = newLeaf !== false
+			? app.workspace.getLeaf(newLeaf)
 			: app.workspace.getMostRecentLeaf() || app.workspace.getLeaf(false);
 		await leaf.setViewState({
 			type: SURFING_VIEW_TYPE,
-			active: true,
+			active,
 			state: { url },
 		});
-		void app.workspace.revealLeaf(leaf);
+		if (active) void app.workspace.revealLeaf(leaf);
 	},
 };
 
@@ -80,13 +80,13 @@ const webviewerAdapter: BrowserAdapter = {
 	kind: "webviewer",
 	isExternal: false,
 	findOpenLeaf: (app, url) => findLeafByUrl(app, WEBVIEWER_VIEW_TYPE, url),
-	open: async (app, url, newLeaf) => {
+	open: async (app, url, newLeaf, active = true) => {
 		const anyApp = app as AnyApp;
 		const plugin = anyApp.internalPlugins?.getEnabledPluginById?.("webviewer") as
-			| { openUrl?: (url: string, newLeaf?: boolean) => void }
+			| { openUrl?: (url: string, newLeaf?: PaneType | boolean, active?: boolean) => void }
 			| undefined;
 		if (plugin?.openUrl) {
-			plugin.openUrl(url, newLeaf);
+			plugin.openUrl(url, newLeaf, active);
 			return;
 		}
 		window.open(url, "_blank", "external");

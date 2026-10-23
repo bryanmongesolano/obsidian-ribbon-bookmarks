@@ -1,9 +1,11 @@
 import {
 	App,
+	Keymap,
 	MarkdownView,
 	Menu,
 	MenuItem,
 	Notice,
+	PaneType,
 	Plugin,
 	PluginSettingTab,
 	SettingDefinitionItem,
@@ -222,7 +224,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			const uniqueKey = `rb-item-${item.id}`;
 
 			const el = this.addRibbonIcon(iconId, uniqueKey, (evt: MouseEvent) => {
-				if (evt.button !== 0 || evt.ctrlKey) return;
+				if (evt.button !== 0) return;
 				if (this.isClickSuppressed()) return;
 				if (item.type === "separator") return;
 				this.handleRibbonItemClick(item, evt, el);
@@ -242,10 +244,15 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			}
 
 			el.addEventListener("auxclick", (evt: MouseEvent) => {
-				if (evt.button === 1 && item.type !== "separator" && item.type !== "folder") {
+				if (evt.button === 1 && item.type !== "separator") {
 					evt.preventDefault();
 					evt.stopPropagation();
-					void this.openBookmarkItem(item, true);
+					if (item.type === "folder") {
+						this.closeAllFolderPopups();
+						this.openFolderChildren(item);
+					} else {
+						void this.openBookmarkItem(item, "tab");
+					}
 				}
 			});
 
@@ -305,8 +312,12 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	}
 
 	private handleRibbonItemClick(item: RibbonBookmarkItem, evt: MouseEvent, anchorEl: HTMLElement): void {
+		const pane = Keymap.isModEvent(evt);
 		if (item.type === "folder") {
-			if (this.openPopups.length > 0 && this.openPopups[0].folder.id === item.id) {
+			if (pane) {
+				this.closeAllFolderPopups();
+				this.openFolderChildren(item);
+			} else if (this.openPopups.length > 0 && this.openPopups[0].folder.id === item.id) {
 				this.closeAllFolderPopups();
 			} else {
 				this.openFolderPopupAtLevel(item, anchorEl, 0);
@@ -314,7 +325,17 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			return;
 		}
 		this.closeAllFolderPopups();
-		void this.openBookmarkItem(item, evt.metaKey);
+		void this.openBookmarkItem(item, pane);
+	}
+
+	private openableChildren(folder: RibbonBookmarkItem): RibbonBookmarkItem[] {
+		return (folder.children ?? []).filter((child) => child.type !== "folder" && child.type !== "separator");
+	}
+
+	private openFolderChildren(folder: RibbonBookmarkItem): void {
+		for (const child of this.openableChildren(folder)) {
+			void this.openBookmarkItem(child, "tab", false);
+		}
 	}
 
 	/* ==========================================================================
@@ -326,8 +347,13 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		await this.app.workspace.revealLeaf(leaf);
 	}
 
-	public async openBookmarkItem(item: RibbonBookmarkItem, forceNewTab = false): Promise<void> {
+	public async openBookmarkItem(
+		item: RibbonBookmarkItem,
+		newLeaf: PaneType | boolean = false,
+		activate = true
+	): Promise<void> {
 		const tabCfg = getTabBehavior(this.app);
+		const explicitPane = newLeaf !== false;
 
 		if (item.type === "url" && item.url) {
 			let targetUrl = item.url;
@@ -342,7 +368,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 			const browser = this.browser;
 
-			if (!forceNewTab && tabCfg.deduplicateTabs && !browser.isExternal) {
+			if (!explicitPane && tabCfg.deduplicateTabs && !browser.isExternal) {
 				const existing = browser.findOpenLeaf(this.app, targetUrl);
 				if (existing) {
 					void this.focusLeaf(existing);
@@ -350,8 +376,8 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				}
 			}
 
-			const openInNew = forceNewTab || tabCfg.openInNewTab;
-			await browser.open(this.app, targetUrl, openInNew);
+			const target: PaneType | boolean = explicitPane ? newLeaf : tabCfg.openInNewTab ? "tab" : false;
+			await browser.open(this.app, targetUrl, target, activate);
 			return;
 		}
 
@@ -360,16 +386,16 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			const abstractFile = this.app.vault.getAbstractFileByPath(cleanPath);
 
 			if (abstractFile instanceof TFile) {
-				if (!forceNewTab && tabCfg.deduplicateTabs) {
+				if (!explicitPane && tabCfg.deduplicateTabs) {
 					const existing = this.findExistingFileLeaf(abstractFile.path, tabCfg.deduplicateAcrossTabGroups);
 					if (existing) {
 						void this.focusLeaf(existing);
 						return;
 					}
 				}
-				const openInNew = forceNewTab || tabCfg.openInNewTab;
-				await this.app.workspace.openLinkText(abstractFile.path, "", openInNew ? "tab" : false, {
-					active: true,
+				const target: PaneType | boolean = explicitPane ? newLeaf : tabCfg.openInNewTab ? "tab" : false;
+				await this.app.workspace.openLinkText(abstractFile.path, "", target, {
+					active: activate,
 				});
 				return;
 			}
@@ -608,12 +634,15 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			});
 
 			row.addEventListener("click", (evt: MouseEvent) => {
-				if (evt.button !== 0 || evt.ctrlKey) return;
+				if (evt.button !== 0) return;
 				if (this.isClickSuppressed()) return;
 				evt.preventDefault();
 				evt.stopPropagation();
 				if (child.type === "folder") {
-					if (this.openPopups[level + 1]?.folder.id === child.id) {
+					if (Keymap.isModEvent(evt)) {
+						this.closeAllFolderPopups();
+						this.openFolderChildren(child);
+					} else if (this.openPopups[level + 1]?.folder.id === child.id) {
 						this.closeFolderPopupsFromLevel(level + 1);
 					} else {
 						this.openFolderPopupAtLevel(child, row, level + 1);
@@ -621,15 +650,19 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					return;
 				}
 				this.closeAllFolderPopups();
-				void this.openBookmarkItem(child, evt.metaKey);
+				void this.openBookmarkItem(child, Keymap.isModEvent(evt));
 			});
 
 			row.addEventListener("auxclick", (evt: MouseEvent) => {
-				if (evt.button === 1 && child.type !== "folder") {
+				if (evt.button === 1 && child.type !== "separator") {
 					evt.preventDefault();
 					evt.stopPropagation();
 					this.closeAllFolderPopups();
-					void this.openBookmarkItem(child, true);
+					if (child.type === "folder") {
+						this.openFolderChildren(child);
+					} else {
+						void this.openBookmarkItem(child, "tab");
+					}
 				}
 			});
 
@@ -677,6 +710,19 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			}, 60);
 		});
 
+		if (item.type === "folder" && this.openableChildren(item).length > 0) {
+			menu.addItem((mi) =>
+				mi
+					.setTitle(this.t("ctxOpenAll"))
+					.setIcon("files")
+					.onClick(() => {
+						this.closeAllFolderPopups();
+						this.openFolderChildren(item);
+					})
+			);
+			menu.addSeparator();
+		}
+
 		if (item.type === "url" || item.type === "file") {
 			menu.addItem((mi) =>
 				mi
@@ -684,7 +730,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 					.setIcon("external-link")
 					.onClick(() => {
 						this.closeAllFolderPopups();
-						void this.openBookmarkItem(item, true);
+						void this.openBookmarkItem(item, "tab");
 					})
 			);
 			if (item.type === "url" && item.url) {
@@ -1125,7 +1171,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		sourceContainerList: RibbonBookmarkItem[]
 	): void {
 		const onMouseDown = (downEvt: MouseEvent) => {
-			if (downEvt.button !== 0 || downEvt.ctrlKey) return;
+			if (downEvt.button !== 0 || Keymap.isModEvent(downEvt)) return;
 			downEvt.stopImmediatePropagation();
 
 			const startX = downEvt.clientX;
