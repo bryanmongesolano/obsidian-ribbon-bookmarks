@@ -230,6 +230,11 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				this.handleRibbonItemClick(item, evt, el);
 			});
 
+			// Obsidian lists ribbon items by their registered title (mobile ribbon menu,
+			// Settings > Appearance > Ribbon). Keep the stable rb-item-<id> key as the
+			// internal id, but show the bookmark's real name there.
+			this.setRibbonEntryTitle(el, this.getRibbonDisplayTitle(item));
+
 			el.setAttribute("data-rb-id", item.id);
 			el.setAttribute("data-rb-type", item.type);
 			el.addClass("rb-ribbon-item");
@@ -268,6 +273,16 @@ export default class RibbonBookmarksPlugin extends Plugin {
 
 		this.syncRibbonDomOrder();
 		this.refreshOpenFolderPopups();
+	}
+
+	private getRibbonDisplayTitle(item: RibbonBookmarkItem): string {
+		if (item.type === "separator") return "─".repeat(12);
+		return item.title || item.url || item.filePath || "•";
+	}
+
+	private setRibbonEntryTitle(el: HTMLElement, title: string): void {
+		const entry = this.leftRibbon?.items?.find((x) => x.buttonEl === el);
+		if (entry) entry.title = title;
 	}
 
 	private syncRibbonDomOrder(): void {
