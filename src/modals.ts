@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, TFile, setIcon, setTooltip } from "obsidian";
+import { App, Modal, Notice, Platform, Setting, TFile, setIcon } from "obsidian";
 import {
 	BUILTIN_BRAND_SVGS,
 	detectKnownUrlIcon,
@@ -23,9 +23,11 @@ export interface BookmarkModalOptions {
 	t: TFn;
 	customIcons: CustomSavedIcon[];
 	savedOnlineIcons: SavedOnlineIcon[];
+	folderOptions?: Array<{ id: string; label: string }>;
+	initialFolderId?: string;
 	onSaveCustomIcon: (icon: CustomSavedIcon) => Promise<void> | void;
 	onSaveOnlineIcon: (icon: SavedOnlineIcon) => Promise<void> | void;
-	onSubmit: (result: RibbonBookmarkItem) => Promise<void> | void;
+	onSubmit: (result: RibbonBookmarkItem, targetFolderId?: string) => Promise<void> | void;
 	onDelete?: (item: RibbonBookmarkItem) => Promise<void> | void;
 }
 
@@ -35,9 +37,11 @@ export class BookmarkItemModal extends Modal {
 	private t: TFn;
 	private customIcons: CustomSavedIcon[];
 	private savedOnlineIcons: SavedOnlineIcon[];
+	private folderOptions: Array<{ id: string; label: string }>;
+	private selectedFolderId: string;
 	private onSaveCustomIconCb: (icon: CustomSavedIcon) => Promise<void> | void;
 	private onSaveOnlineIconCb: (icon: SavedOnlineIcon) => Promise<void> | void;
-	private onSubmitCb: (result: RibbonBookmarkItem) => Promise<void> | void;
+	private onSubmitCb: (result: RibbonBookmarkItem, targetFolderId?: string) => Promise<void> | void;
 	private onDeleteCb?: (item: RibbonBookmarkItem) => Promise<void> | void;
 	private activeIconTab: "icons" | "internet" = "icons";
 	private iconPreviewBoxEl: HTMLElement | null = null;
@@ -49,6 +53,9 @@ export class BookmarkItemModal extends Modal {
 	private cellByLabel: Map<string, HTMLElement> = new Map();
 	private selectedCellEl: HTMLElement | null = null;
 	private cachedVaultFiles: Array<{ file: TFile; lowerPath: string }> | null = null;
+	private activeHelpTooltipEl: HTMLElement | null = null;
+	private activeHelpAnchorEl: HTMLElement | null = null;
+	private dismissHelpHandler: ((evt: Event) => void) | null = null;
 
 	constructor(opts: BookmarkModalOptions) {
 		super(opts.app);
@@ -57,6 +64,8 @@ export class BookmarkItemModal extends Modal {
 		this.t = opts.t;
 		this.customIcons = opts.customIcons;
 		this.savedOnlineIcons = opts.savedOnlineIcons ?? [];
+		this.folderOptions = opts.folderOptions ?? [];
+		this.selectedFolderId = opts.initialFolderId ?? "";
 		this.onSaveCustomIconCb = opts.onSaveCustomIcon;
 		this.onSaveOnlineIconCb = opts.onSaveOnlineIcon;
 		this.onSubmitCb = opts.onSubmit;
@@ -79,7 +88,7 @@ export class BookmarkItemModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.modalEl.addClass("rb-bookmark-modal");
+		this.modalEl.addClass("rb-bookmark-modal", "mod-lg");
 		this.render();
 	}
 
@@ -88,6 +97,7 @@ export class BookmarkItemModal extends Modal {
 			window.clearTimeout(this.autoDetectTimer);
 			this.autoDetectTimer = null;
 		}
+		this.hideHelpTooltip();
 		this.disconnectGridObserver();
 		this.cellByLabel.clear();
 		this.selectedCellEl = null;
@@ -102,14 +112,82 @@ export class BookmarkItemModal extends Modal {
 		}
 	}
 
+	private hideHelpTooltip(): void {
+		if (this.activeHelpTooltipEl) {
+			this.activeHelpTooltipEl.remove();
+			this.activeHelpTooltipEl = null;
+		}
+		this.activeHelpAnchorEl = null;
+		if (this.dismissHelpHandler) {
+			document.removeEventListener("pointerdown", this.dismissHelpHandler, true);
+			this.dismissHelpHandler = null;
+		}
+	}
+
+	private showHelpTooltip(anchorEl: HTMLElement, text: string): void {
+		this.hideHelpTooltip();
+		const tipEl = document.body.createDiv({
+			cls: "tooltip mod-top rb-help-tooltip",
+			text,
+		});
+		const arrowEl = tipEl.createDiv({ cls: "tooltip-arrow" });
+
+		const iconRect = anchorEl.getBoundingClientRect();
+		const tipRect = tipEl.getBoundingClientRect();
+		const iconCenterX = iconRect.left + iconRect.width / 2;
+
+		const left = Math.max(
+			8,
+			Math.min(window.innerWidth - tipRect.width - 8, iconCenterX - tipRect.width / 2)
+		);
+		const arrowLeft = Math.max(10, Math.min(tipRect.width - 10, iconCenterX - left));
+		arrowEl.setCssStyles({ left: `${arrowLeft}px` });
+
+		let top = iconRect.top - tipRect.height - 8;
+		if (top < 8) {
+			top = iconRect.bottom + 8;
+			tipEl.removeClass("mod-top");
+		}
+
+		tipEl.setCssStyles({
+			left: `${left}px`,
+			top: `${top}px`,
+		});
+
+		this.activeHelpTooltipEl = tipEl;
+		this.activeHelpAnchorEl = anchorEl;
+
+		this.dismissHelpHandler = (evt: Event) => {
+			const target = evt.target as Node | null;
+			if (target && anchorEl.contains(target)) return;
+			this.hideHelpTooltip();
+		};
+		document.addEventListener("pointerdown", this.dismissHelpHandler, true);
+	}
+
 	private createSettingWithHelp(container: HTMLElement, nameText: string, helpTooltip: string): Setting {
 		const setting = new Setting(container);
+		setting.settingEl.addClass("rb-field-item");
 		setting.nameEl.empty();
 		const labelRow = setting.nameEl.createDiv({ cls: "rb-setting-label-row" });
 		labelRow.createSpan({ text: nameText });
 		const helpIcon = labelRow.createSpan({ cls: "rb-help-icon" });
 		setIcon(helpIcon, "help-circle");
-		setTooltip(helpIcon, helpTooltip, { placement: "top" });
+		helpIcon.addEventListener("click", (evt) => {
+			evt.preventDefault();
+			evt.stopPropagation();
+			if (this.activeHelpAnchorEl === helpIcon) {
+				this.hideHelpTooltip();
+			} else {
+				this.showHelpTooltip(helpIcon, helpTooltip);
+			}
+		});
+		helpIcon.addEventListener("mouseenter", () => {
+			this.showHelpTooltip(helpIcon, helpTooltip);
+		});
+		helpIcon.addEventListener("mouseleave", () => {
+			this.hideHelpTooltip();
+		});
 		return setting;
 	}
 
@@ -124,6 +202,7 @@ export class BookmarkItemModal extends Modal {
 
 	private render(): void {
 		const { contentEl } = this;
+		this.hideHelpTooltip();
 		this.disconnectGridObserver();
 		contentEl.empty();
 
@@ -169,9 +248,20 @@ export class BookmarkItemModal extends Modal {
 
 			if (this.draft.type === "url") {
 				this.renderUrlFields(formEl);
-			} else if (this.isNew && this.draft.type === "file") {
+			} else if (this.draft.type === "file") {
 				this.renderFileFields(formEl);
 			}
+		}
+
+		if (this.folderOptions.length > 1) {
+			this.createSettingWithHelp(formEl, this.t("fieldLocation"), this.t("helpLocation")).addDropdown((dd) => {
+				for (const opt of this.folderOptions) {
+					dd.addOption(opt.id, opt.label);
+				}
+				dd.setValue(this.selectedFolderId).onChange((val) => {
+					this.selectedFolderId = val;
+				});
+			});
 		}
 
 		this.renderIconPickerSection(contentEl);
@@ -352,7 +442,7 @@ export class BookmarkItemModal extends Modal {
 			}
 		};
 
-		const resultsEl = container.createDiv({ cls: "rb-vault-file-results" });
+		const resultsEl = fileSetting.settingEl.createDiv({ cls: "rb-vault-file-results" });
 		resultsEl.hide();
 
 		fileSetting.addText((text) => {
@@ -389,10 +479,27 @@ export class BookmarkItemModal extends Modal {
 		});
 
 		fileSetting.addButton((btn) => {
+			btn.buttonEl.addClass("rb-file-browse-btn");
 			btn
 				.setIcon("folder-open")
-				.setTooltip(this.t("browseMac"))
+				.setTooltip(Platform.isMobile ? this.t("vaultFileSearchPlaceholder") : this.t("browseMac"))
 				.onClick(() => {
+					if (Platform.isMobile) {
+						if (resultsEl.isShown()) {
+							resultsEl.hide();
+							resultsEl.empty();
+						} else {
+							inputEl?.focus();
+							this.renderVaultMatches(resultsEl, inputEl?.value.trim() || "", (chosen) => {
+								applyPath(chosen.path);
+								if (inputEl) inputEl.value = chosen.path;
+								if (!this.draft.title) this.draft.title = chosen.name;
+								resultsEl.hide();
+								resultsEl.empty();
+							});
+						}
+						return;
+					}
 					const fileInput = createEl("input", { type: "file" });
 					fileInput.onchange = () => {
 						const file = fileInput.files?.[0];
@@ -846,7 +953,7 @@ export class BookmarkItemModal extends Modal {
 				}
 			}
 
-			await this.onSubmitCb(this.draft);
+			await this.onSubmitCb(this.draft, this.selectedFolderId);
 			this.close();
 		};
 	}

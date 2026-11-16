@@ -9,6 +9,7 @@ import {
 	Plugin,
 	PluginSettingTab,
 	SettingDefinitionItem,
+	TAbstractFile,
 	TFile,
 	TFolder,
 	WorkspaceLeaf,
@@ -104,6 +105,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	private hasOpenContextMenu = false;
 	private suppressClickUntil = 0;
 	private bypassNextRibbonContextMenu = false;
+	private pluginSettingTab: RibbonBookmarksSettingTab | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -112,9 +114,36 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			this.ensureDropBarEl();
 			this.renderRibbonItems();
 			this.setupRibbonContextMenuAndDragDrop();
+			this.setupMobileRibbonMenuSupport();
 			this.setupTabHeaderDragTracking();
 		});
-		this.addSettingTab(new RibbonBookmarksSettingTab(this.app, this));
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) => {
+				if (this.updatePathsOnVaultRename(this.settings.items, file, oldPath)) {
+					void this.saveSettings(false).then(() => {
+						this.renderRibbonItems();
+					});
+				}
+			})
+		);
+		this.addCommand({
+			id: "add-bookmark-item",
+			name: this.t("cmdAddBookmark"),
+			icon: "bookmark-plus",
+			callback: () => {
+				this.openAddModal();
+			},
+		});
+		this.addCommand({
+			id: "bookmark-current-tab",
+			name: this.t("cmdBookmarkCurrentTab"),
+			icon: "bookmark",
+			callback: () => {
+				void this.bookmarkActiveLeaf();
+			},
+		});
+		this.pluginSettingTab = new RibbonBookmarksSettingTab(this.app, this);
+		this.addSettingTab(this.pluginSettingTab);
 	}
 
 	onunload(): void {
@@ -160,9 +189,16 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		}
 	}
 
-	async saveSettings(): Promise<void> {
-		this.settings.items = this.normalizeFolderTree(this.settings.items);
+	async saveSettings(collapseFolders = true): Promise<void> {
+		if (collapseFolders) {
+			this.settings.items = this.normalizeFolderTree(this.settings.items);
+		}
 		await this.saveData(this.settings);
+		this.notifySettingsChanged();
+	}
+
+	public notifySettingsChanged(): void {
+		this.pluginSettingTab?.update();
 	}
 
 	private normalizeFolderTree(list: RibbonBookmarkItem[]): RibbonBookmarkItem[] {
@@ -203,6 +239,13 @@ export default class RibbonBookmarksPlugin extends Plugin {
 	   Ribbon rendering
 	   ========================================================================== */
 
+	public getItemDisplayTitle(item: RibbonBookmarkItem): string {
+		if (item.type === "separator") {
+			return this.t("defaultSeparator");
+		}
+		return item.title || item.url || item.filePath || "•";
+	}
+
 	private clearRibbonElements(): void {
 		const ribbon = this.leftRibbon;
 		const items = ribbon?.items;
@@ -222,9 +265,10 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		for (const item of this.settings.items) {
 			const iconId = getOrRegisterItemIconId(item);
 			const uniqueKey = `rb-item-${item.id}`;
+			const displayTitle = this.getItemDisplayTitle(item);
 
 			const el = this.addRibbonIcon(iconId, uniqueKey, (evt: MouseEvent) => {
-				if (evt.button !== 0) return;
+				if (typeof evt.button === "number" && evt.button !== 0) return;
 				if (this.isClickSuppressed()) return;
 				if (item.type === "separator") return;
 				this.handleRibbonItemClick(item, evt, el);
@@ -239,7 +283,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				el.removeAttribute("aria-label");
 				el.empty();
 			} else {
-				setTooltip(el, item.title || item.url || item.filePath || "•", { placement: "right" });
+				setTooltip(el, displayTitle, { placement: "right" });
 				if (item.type === "folder") el.addClass("rb-ribbon-folder");
 			}
 
@@ -296,9 +340,16 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		}
 
 		const ourEntries: typeof ribbon.items = [];
-		for (const el of ourSet) {
-			const found = byButtonEl.get(el);
-			if (found) ourEntries.push(found);
+		for (const item of this.settings.items) {
+			const el = this.renderedEls.get(item.id);
+			const found = el ? byButtonEl.get(el) : undefined;
+			if (found) {
+				found.title = this.getItemDisplayTitle(item);
+				if (item.type === "separator") {
+					found.icon = "minus";
+				}
+				ourEntries.push(found);
+			}
 		}
 		ribbon.items.splice(0, ribbon.items.length, ...others, ...ourEntries);
 	}
@@ -317,7 +368,14 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			if (pane) {
 				this.closeAllFolderPopups();
 				this.openFolderChildren(item);
-			} else if (this.openPopups.length > 0 && this.openPopups[0].folder.id === item.id) {
+				return;
+			}
+			const rect = anchorEl.getBoundingClientRect();
+			if (rect.width === 0 && rect.height === 0) {
+				this.openMobileFolderMenu(item, evt);
+				return;
+			}
+			if (this.openPopups.length > 0 && this.openPopups[0].folder.id === item.id) {
 				this.closeAllFolderPopups();
 			} else {
 				this.openFolderPopupAtLevel(item, anchorEl, 0);
@@ -798,6 +856,162 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		const captured = pendingNativeRibbonMenu;
 		pendingNativeRibbonMenu = null;
 		return captured;
+	}
+
+	private openMobileFolderMenu(folder: RibbonBookmarkItem, evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.setUseNativeMenu(false);
+		this.populateMobileFolderSubmenu(menu, folder);
+		menu.showAtMouseEvent(evt);
+	}
+
+	private populateMobileFolderSubmenu(menu: Menu, folder: RibbonBookmarkItem): void {
+		menu.setUseNativeMenu(false);
+		const children = folder.children || [];
+
+		for (let i = 0; i < children.length; i++) {
+			const child = children[i];
+			if (child.type === "separator") {
+				menu.addSeparator();
+				continue;
+			}
+
+			menu.addItem((mi) => {
+				mi.setTitle(this.getItemDisplayTitle(child)).setIcon(getOrRegisterItemIconId(child));
+				if (child.type === "folder") {
+					const sub = (mi as unknown as { setSubmenu?: () => Menu }).setSubmenu?.();
+					if (sub) {
+						this.populateMobileFolderSubmenu(sub, child);
+					} else {
+						mi.onClick((evt) => {
+							if (evt instanceof MouseEvent) {
+								this.openMobileFolderMenu(child, evt);
+							}
+						});
+					}
+					return;
+				}
+				mi.onClick((evt) => {
+					void this.openBookmarkItem(child, Keymap.isModEvent(evt));
+				});
+			});
+		}
+	}
+
+	private setupMobileRibbonMenuSupport(): void {
+		const menuProto = Menu.prototype as unknown as {
+			showAtPosition: (pos: unknown, doc?: Document) => Menu;
+		};
+		const origShowAtPosition = menuProto.showAtPosition;
+		if (typeof origShowAtPosition !== "function") return;
+
+		const transformMenu = (menu: Menu): void => {
+			this.transformMobileRibbonMenuIfNeeded(menu);
+		};
+
+		menuProto.showAtPosition = function (this: Menu, pos: unknown, doc?: Document): Menu {
+			transformMenu(this);
+			origShowAtPosition.call(this, pos, doc);
+			return this;
+		};
+
+		this.cleanupListeners.push(() => {
+			menuProto.showAtPosition = origShowAtPosition;
+		});
+	}
+
+	private transformMobileRibbonMenuIfNeeded(menu: Menu): void {
+		const menuAny = menu as unknown as {
+			parentEl?: HTMLElement | null;
+			items?: unknown[];
+			_rbTransformed?: boolean;
+		};
+		if (menuAny._rbTransformed) return;
+		const parentEl = menuAny.parentEl;
+		if (!parentEl) return;
+
+		const mobileNavbar = (
+			this.app as unknown as {
+				mobileNavbar?: { ribbonMenuItemEl?: HTMLElement };
+			}
+		).mobileNavbar;
+
+		const isMobileRibbonMenu =
+			parentEl === mobileNavbar?.ribbonMenuItemEl || Boolean(parentEl.closest(".mobile-navbar-action-menu"));
+		if (!isMobileRibbonMenu) return;
+
+		menuAny._rbTransformed = true;
+
+		const menuItems = menuAny.items;
+		const ribbonItems = this.leftRibbon?.items;
+		if (!Array.isArray(menuItems) || !Array.isArray(ribbonItems)) return;
+
+		const visibleRibbonItems = ribbonItems.filter((entry) => !entry.hidden);
+		if (menuItems.length !== visibleRibbonItems.length) return;
+
+		const marker = ":rb-item-";
+		const rebuiltItems: unknown[] = [];
+
+		const createMenuSeparator = (): unknown => {
+			menu.addSeparator();
+			return menuItems.pop();
+		};
+
+		let prevKind: "other" | "ours" | null = null;
+		let prevWasSeparator = false;
+
+		for (let i = 0; i < visibleRibbonItems.length; i++) {
+			const ribbonEntry = visibleRibbonItems[i];
+			const origMenuItem = menuItems[i];
+			const markerIdx = ribbonEntry.id.indexOf(marker);
+
+			if (markerIdx === -1) {
+				if (prevKind === "ours" && !prevWasSeparator) {
+					const sep = createMenuSeparator();
+					if (sep) rebuiltItems.push(sep);
+				}
+				rebuiltItems.push(origMenuItem);
+				prevKind = "other";
+				prevWasSeparator = false;
+				continue;
+			}
+
+			const rbId = ribbonEntry.id.slice(markerIdx + marker.length);
+			const bookmarkItem = this.findItemByIdRecursive(this.settings.items, rbId);
+			if (!bookmarkItem) {
+				rebuiltItems.push(origMenuItem);
+				continue;
+			}
+
+			if (prevKind === "other" && !prevWasSeparator && bookmarkItem.type !== "separator") {
+				const sep = createMenuSeparator();
+				if (sep) rebuiltItems.push(sep);
+			}
+
+			if (bookmarkItem.type === "separator") {
+				const sep = createMenuSeparator();
+				if (sep) rebuiltItems.push(sep);
+				prevKind = "ours";
+				prevWasSeparator = true;
+				continue;
+			}
+
+			const natItem = origMenuItem as MenuItem | undefined;
+			if (natItem) {
+				natItem.setTitle(this.getItemDisplayTitle(bookmarkItem));
+				if (bookmarkItem.type === "folder") {
+					const sub = (natItem as unknown as { setSubmenu?: () => Menu }).setSubmenu?.();
+					if (sub) {
+						this.populateMobileFolderSubmenu(sub, bookmarkItem);
+					}
+				}
+				rebuiltItems.push(natItem);
+			}
+			prevKind = "ours";
+			prevWasSeparator = false;
+		}
+
+		menuItems.splice(0, menuItems.length, ...rebuiltItems);
 	}
 
 	private setupRibbonContextMenuAndDragDrop(): void {
@@ -1576,32 +1790,222 @@ export default class RibbonBookmarksPlugin extends Plugin {
 		return results;
 	}
 
+	private updatePathsOnVaultRename(
+		list: RibbonBookmarkItem[],
+		file: TAbstractFile,
+		oldPath: string
+	): boolean {
+		let changed = false;
+		const oldName = oldPath.split("/").pop() || oldPath;
+		for (const item of list) {
+			if (item.type === "folder" && item.children) {
+				if (this.updatePathsOnVaultRename(item.children, file, oldPath)) {
+					changed = true;
+				}
+			} else if (item.type === "file" && item.filePath) {
+				if (item.filePath === oldPath) {
+					if (!item.title || item.title === oldName || item.title === oldPath) {
+						item.title = file.name;
+					}
+					item.filePath = file.path;
+					if (item.iconSource === "auto") {
+						item.lucideIcon = getLucideIconForFilePath(file.path);
+					}
+					changed = true;
+				} else if (item.filePath.startsWith(oldPath + "/")) {
+					item.filePath = file.path + item.filePath.slice(oldPath.length);
+					changed = true;
+				}
+			}
+		}
+		return changed;
+	}
+
+	private async bookmarkActiveLeaf(): Promise<void> {
+		const leaf = this.app.workspace.getMostRecentLeaf();
+		if (!leaf) {
+			this.openAddModal();
+			return;
+		}
+		const viewType = leaf.view?.getViewType?.() || "";
+		const viewState = leaf.getViewState();
+		const viewAny = leaf.view as unknown as {
+			currentUrl?: string;
+			currentTitle?: string;
+			file?: TFile;
+			getDisplayText?: () => string;
+		};
+
+		if (viewType === "surfing-view" || viewType === "webviewer") {
+			const url =
+				viewAny.currentUrl ||
+				(viewState.state as { url?: string } | undefined)?.url ||
+				"";
+			if (url) {
+				const title = viewAny.currentTitle || viewAny.getDisplayText?.() || url;
+				const resolved = await resolveAutoIconForUrl(url);
+				this.settings.items.push({
+					id: crypto.randomUUID(),
+					type: "url",
+					title,
+					url,
+					iconSource: resolved.iconSource,
+					customSvg: resolved.customSvg,
+					lucideIcon: resolved.lucideIcon,
+					onlineIconKey: resolved.onlineKey,
+				});
+				await this.saveSettings(false);
+				this.renderRibbonItems();
+				new Notice(this.t("noticeBookmarkAdded", { title }));
+				return;
+			}
+		}
+
+		const file =
+			viewAny.file ||
+			(typeof (viewState.state as { file?: string } | undefined)?.file === "string"
+				? this.app.vault.getAbstractFileByPath((viewState.state as { file: string }).file)
+				: null);
+
+		if (file instanceof TFile) {
+			this.settings.items.push({
+				id: crypto.randomUUID(),
+				type: "file",
+				title: file.name,
+				filePath: file.path,
+				iconSource: "auto",
+				lucideIcon: getLucideIconForFilePath(file.path),
+			});
+			await this.saveSettings(false);
+			this.renderRibbonItems();
+			new Notice(this.t("noticeBookmarkAdded", { title: file.name }));
+			return;
+		}
+
+		this.openAddModal();
+	}
+
+	private buildFolderOptions(excludeFolderId?: string): Array<{ id: string; label: string }> {
+		const opts: Array<{ id: string; label: string }> = [
+			{ id: "", label: this.t("locationRoot") },
+		];
+		const walk = (list: RibbonBookmarkItem[], depth: number) => {
+			for (const item of list) {
+				if (item.type === "folder") {
+					if (excludeFolderId && item.id === excludeFolderId) continue;
+					const prefix = depth > 0 ? "\u00A0".repeat(depth * 4) + "↳ " : "";
+					opts.push({
+						id: item.id,
+						label: prefix + this.getItemDisplayTitle(item),
+					});
+					if (item.children && item.children.length > 0) {
+						walk(item.children, depth + 1);
+					}
+				}
+			}
+		};
+		walk(this.settings.items, 0);
+		return opts;
+	}
+
+	private findFolderIdForContainerList(targetList: RibbonBookmarkItem[]): string {
+		if (targetList === this.settings.items) return "";
+		const walk = (list: RibbonBookmarkItem[]): string | null => {
+			for (const item of list) {
+				if (item.type === "folder") {
+					if (item.children === targetList) return item.id;
+					if (item.children) {
+						const found = walk(item.children);
+						if (found !== null) return found;
+					}
+				}
+			}
+			return null;
+		};
+		return walk(this.settings.items) ?? "";
+	}
+
+	private getContainerListByFolderId(folderId: string): RibbonBookmarkItem[] {
+		if (!folderId) return this.settings.items;
+		const folder = this.findItemByIdRecursive(this.settings.items, folderId);
+		if (folder && folder.type === "folder") {
+			folder.children = folder.children || [];
+			return folder.children;
+		}
+		return this.settings.items;
+	}
+
 	/* ==========================================================================
 	   Modals
 	   ========================================================================== */
 
-	public openAddModal(insertIndex?: number): void {
+	public openAddModal(insertIndex?: number, containerList: RibbonBookmarkItem[] = this.settings.items): void {
+		const initialFolderId = this.findFolderIdForContainerList(containerList);
 		new BookmarkItemModal({
 			app: this.app,
 			isNew: true,
 			t: this.t,
 			customIcons: this.settings.customIcons,
 			savedOnlineIcons: this.settings.savedOnlineIcons,
+			folderOptions: this.buildFolderOptions(),
+			initialFolderId,
 			onSaveCustomIcon: (ic) => this.saveCustomIcon(ic),
 			onSaveOnlineIcon: (ic) => this.saveOnlineIcon(ic),
-			onSubmit: async (created) => {
-				if (typeof insertIndex === "number" && insertIndex >= 0 && insertIndex <= this.settings.items.length) {
-					this.settings.items.splice(insertIndex, 0, created);
+			onSubmit: async (created, targetFolderId) => {
+				if (targetFolderId !== undefined && targetFolderId !== initialFolderId) {
+					const destList = this.getContainerListByFolderId(targetFolderId);
+					destList.push(created);
+				} else if (
+					typeof insertIndex === "number" &&
+					insertIndex >= 0 &&
+					insertIndex <= containerList.length
+				) {
+					containerList.splice(insertIndex, 0, created);
 				} else {
-					this.settings.items.push(created);
+					containerList.push(created);
 				}
-				await this.saveSettings();
+				await this.saveSettings(false);
+				this.renderRibbonItems();
+			},
+		}).open();
+	}
+
+	public openAddFolderModal(containerList: RibbonBookmarkItem[] = this.settings.items): void {
+		const initialFolderId = this.findFolderIdForContainerList(containerList);
+		const initialFolder: RibbonBookmarkItem = {
+			id: crypto.randomUUID(),
+			type: "folder",
+			title: "",
+			iconSource: "auto",
+			lucideIcon: "folder",
+			children: [],
+		};
+		new BookmarkItemModal({
+			app: this.app,
+			item: initialFolder,
+			isNew: true,
+			t: this.t,
+			customIcons: this.settings.customIcons,
+			savedOnlineIcons: this.settings.savedOnlineIcons,
+			folderOptions: this.buildFolderOptions(),
+			initialFolderId,
+			onSaveCustomIcon: (ic) => this.saveCustomIcon(ic),
+			onSaveOnlineIcon: (ic) => this.saveOnlineIcon(ic),
+			onSubmit: async (created, targetFolderId) => {
+				created.children = created.children || [];
+				const destList =
+					targetFolderId !== undefined && targetFolderId !== initialFolderId
+						? this.getContainerListByFolderId(targetFolderId)
+						: containerList;
+				destList.push(created);
+				await this.saveSettings(false);
 				this.renderRibbonItems();
 			},
 		}).open();
 	}
 
 	public openEditModal(item: RibbonBookmarkItem, containerList: RibbonBookmarkItem[]): void {
+		const initialFolderId = this.findFolderIdForContainerList(containerList);
 		new BookmarkItemModal({
 			app: this.app,
 			item,
@@ -1609,13 +2013,23 @@ export default class RibbonBookmarksPlugin extends Plugin {
 			t: this.t,
 			customIcons: this.settings.customIcons,
 			savedOnlineIcons: this.settings.savedOnlineIcons,
+			folderOptions: this.buildFolderOptions(item.type === "folder" ? item.id : undefined),
+			initialFolderId,
 			onSaveCustomIcon: (ic) => this.saveCustomIcon(ic),
 			onSaveOnlineIcon: (ic) => this.saveOnlineIcon(ic),
-			onSubmit: async (updated) => {
+			onSubmit: async (updated, targetFolderId) => {
 				const idx = containerList.findIndex((x) => x.id === item.id);
-				if (idx !== -1) {
+				if (targetFolderId !== undefined && targetFolderId !== initialFolderId) {
+					if (idx !== -1) {
+						containerList.splice(idx, 1);
+					}
+					const destList = this.getContainerListByFolderId(targetFolderId);
+					destList.push(updated);
+					await this.saveSettings(false);
+					this.renderRibbonItems();
+				} else if (idx !== -1) {
 					containerList[idx] = updated;
-					await this.saveSettings();
+					await this.saveSettings(false);
 					this.renderRibbonItems();
 				}
 			},
@@ -1623,7 +2037,7 @@ export default class RibbonBookmarksPlugin extends Plugin {
 				const idx = containerList.findIndex((x) => x.id === item.id);
 				if (idx !== -1) {
 					containerList.splice(idx, 1);
-					await this.saveSettings();
+					await this.saveSettings(false);
 					this.renderRibbonItems();
 				}
 			},
@@ -1634,10 +2048,217 @@ export default class RibbonBookmarksPlugin extends Plugin {
 /** Settings use Obsidian's declarative API so they also show up in the settings search. */
 class RibbonBookmarksSettingTab extends PluginSettingTab {
 	plugin: RibbonBookmarksPlugin;
+	icon = "bookmark";
 
 	constructor(app: App, plugin: RibbonBookmarksPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	private attachAddSelectButton(
+		extraBtnEl: HTMLElement,
+		getContainerList: () => RibbonBookmarkItem[],
+		allowSeparator: boolean
+	): void {
+		extraBtnEl.addClass("rb-settings-add-btn");
+		extraBtnEl.querySelectorAll("select.rb-native-add-select").forEach((el) => el.remove());
+
+		const selectEl = extraBtnEl.createEl("select", {
+			cls: "rb-native-add-select",
+			attr: { "aria-label": this.plugin.t("ribbonAddItem") },
+		});
+
+		const buildOptions = () => {
+			const t = this.plugin.t;
+			selectEl.setAttr("aria-label", t("ribbonAddItem"));
+			selectEl.empty();
+			const placeholder = selectEl.createEl("option", {
+				text: "",
+				value: "",
+			});
+			placeholder.disabled = true;
+			placeholder.selected = true;
+			placeholder.hidden = true;
+
+			selectEl.createEl("option", {
+				text: t("ribbonAddItem"),
+				value: "item",
+			});
+			selectEl.createEl("option", {
+				text: t("settingsAddFolder"),
+				value: "folder",
+			});
+			if (allowSeparator) {
+				selectEl.createEl("option", {
+					text: t("ribbonAddSeparator"),
+					value: "separator",
+				});
+			}
+			selectEl.value = "";
+		};
+
+		buildOptions();
+
+		selectEl.addEventListener("mousedown", () => {
+			buildOptions();
+		});
+		selectEl.addEventListener(
+			"touchstart",
+			() => {
+				buildOptions();
+			},
+			{ passive: true }
+		);
+
+		selectEl.addEventListener("change", () => {
+			const val = selectEl.value;
+			selectEl.value = "";
+			const containerList = getContainerList();
+			const t = this.plugin.t;
+			if (val === "item") {
+				this.plugin.openAddModal(undefined, containerList);
+			} else if (val === "folder") {
+				this.plugin.openAddFolderModal(containerList);
+			} else if (val === "separator") {
+				containerList.push({
+					id: crypto.randomUUID(),
+					type: "separator",
+					title: t("defaultSeparator"),
+					iconSource: "auto",
+				});
+				void this.plugin.saveSettings(false).then(() => {
+					this.plugin.renderRibbonItems();
+					this.update();
+				});
+			}
+		});
+	}
+
+	private buildBookmarkListDef(
+		getContainerList: () => RibbonBookmarkItem[],
+		options: { heading: string; emptyState: string; allowSeparator: boolean }
+	): SettingDefinitionItem {
+		const containerList = getContainerList();
+		return {
+			type: "list",
+			cls: "rb-bookmarks-list",
+			heading: options.heading,
+			emptyState: options.emptyState,
+			extraButtons: [
+				(btn) => {
+					btn.setIcon("plus").setTooltip(this.plugin.t("ribbonAddItem"));
+					this.attachAddSelectButton(
+						btn.extraSettingsEl,
+						getContainerList,
+						options.allowSeparator
+					);
+				},
+			],
+			onReorder: (oldIndex, newIndex) => {
+				const list = getContainerList();
+				if (oldIndex < 0 || oldIndex >= list.length) return;
+				if (newIndex < 0 || newIndex >= list.length) return;
+				const [moved] = list.splice(oldIndex, 1);
+				if (!moved) return;
+				list.splice(newIndex, 0, moved);
+				void this.plugin.saveSettings(false).then(() => {
+					this.plugin.renderRibbonItems();
+					this.update();
+				});
+			},
+			onDelete: (index) => {
+				const list = getContainerList();
+				if (index < 0 || index >= list.length) return;
+				list.splice(index, 1);
+				void this.plugin.saveSettings(false).then(() => {
+					this.plugin.renderRibbonItems();
+					this.update();
+				});
+			},
+			items: containerList.map((item) => this.buildBookmarkRowDef(item, containerList)),
+		};
+	}
+
+	private buildBookmarkRowDef(
+		item: RibbonBookmarkItem,
+		containerList: RibbonBookmarkItem[]
+	): NonNullable<Extract<SettingDefinitionItem, { type: "list" }>["items"]>[number] {
+		const t = this.plugin.t;
+		const title = this.plugin.getItemDisplayTitle(item);
+		const iconId = item.type === "separator" ? "minus" : getOrRegisterItemIconId(item);
+
+		if (item.type === "folder") {
+			item.children = item.children || [];
+			const count = item.children.length;
+			const countLabel =
+				count === 1 ? t("settingsItemCountOne") : t("settingsItemCountMany", { count });
+			const rowDef: NonNullable<Extract<SettingDefinitionItem, { type: "list" }>["items"]>[number] & {
+				id?: string;
+				icon?: string;
+			} = {
+				id: item.id,
+				type: "page",
+				name: title,
+				icon: iconId,
+				displayValue: countLabel,
+				searchable: false,
+				items: [
+					{
+						name: t("ctxModify"),
+						desc: title,
+						searchable: false,
+						render: (setting) => {
+							(setting as unknown as { setIcon?: (ic: string) => void }).setIcon?.(iconId);
+							setting.addButton((btn) =>
+								btn
+									.setIcon("pencil")
+									.setButtonText(t("ctxModify"))
+									.onClick(() => this.plugin.openEditModal(item, containerList))
+							);
+						},
+					},
+					this.buildBookmarkListDef(
+						() => {
+							item.children = item.children || [];
+							return item.children;
+						},
+						{
+							heading: t("settingsBookmarksHeading"),
+							emptyState: t("settingsEmptyFolder"),
+							allowSeparator: false,
+						}
+					),
+				],
+			};
+			return rowDef;
+		}
+
+		if (item.type === "separator") {
+			const sepDef: NonNullable<Extract<SettingDefinitionItem, { type: "list" }>["items"]>[number] & {
+				id?: string;
+				icon?: string;
+			} = {
+				id: item.id,
+				name: title,
+				icon: iconId,
+				searchable: false,
+			};
+			return sepDef;
+		}
+
+		const rowDef: NonNullable<Extract<SettingDefinitionItem, { type: "list" }>["items"]>[number] & {
+			id?: string;
+			icon?: string;
+		} = {
+			id: item.id,
+			name: title,
+			icon: iconId,
+			searchable: false,
+			action: () => {
+				this.plugin.openEditModal(item, containerList);
+			},
+		};
+		return rowDef;
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
@@ -1657,6 +2278,11 @@ class RibbonBookmarksSettingTab extends PluginSettingTab {
 					},
 				},
 			},
+			this.buildBookmarkListDef(() => this.plugin.settings.items, {
+				heading: t("settingsBookmarksHeading"),
+				emptyState: t("settingsEmptyBookmarks"),
+				allowSeparator: true,
+			}),
 		];
 	}
 
@@ -1669,8 +2295,9 @@ class RibbonBookmarksSettingTab extends PluginSettingTab {
 		if (key !== "language") return;
 		if (value !== "auto" && value !== "es" && value !== "en") return;
 		this.plugin.settings.language = value;
-		await this.plugin.saveSettings();
+		await this.plugin.saveSettings(false);
 		this.plugin.refreshTranslator();
 		this.plugin.renderRibbonItems();
+		this.update();
 	}
 }

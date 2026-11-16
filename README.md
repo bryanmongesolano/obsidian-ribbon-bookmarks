@@ -19,9 +19,10 @@ Everything you reach for often, one click away in the left sidebar.
 
 ## Features
 
-- **Web links and any file type** — notes, PDFs, canvas, Excalidraw, Office documents, video, audio and archives.
-- **Nested folders** — drop an item on another to group them. Folders open in cascading side menus and nest without limit.
-- **Drag and drop** — drag a tab, a link, or files and folders straight onto the ribbon.
+- **Web links and any file type** — notes, PDFs, canvas, Excalidraw, Office documents, video, audio and archives, with automatic path updates when files or folders are renamed or moved in the vault.
+- **Nested folders** — drop an item on another to group them. Folders open in cascading side menus on desktop and native submenus on mobile, and nest without limit.
+- **Drag and drop & Command Palette** — drag a tab, a link, or files and folders straight onto the ribbon, or use **Bookmark current file or tab** / **Add new bookmark** from the Command Palette.
+- **Desktop and Mobile ready** — full support for Obsidian Mobile's ribbon menu (with grouped card sections for separators and native folder submenus) plus complete bookmark management in **Settings → Ribbon Bookmarks**.
 - **Flat monochrome icons** — Lucide, built-in brand logos, an online SVG search, or your own `.svg` files, always tinted by the current theme.
 - **No lock-in** — it opens links in whichever browser is already enabled in the vault, and follows whatever tab behavior you have configured.
 
@@ -59,7 +60,8 @@ Opening a folder this way only takes its direct items, as tabs: nested folders a
 
 ## Settings
 
-Language: automatic (follows the app), English or Spanish.
+- **Language:** automatic (follows the app), English or Spanish.
+- **Bookmarks manager:** add, edit, delete, reorder and move items, folders and separators directly from **Settings → Ribbon Bookmarks** on both desktop and mobile.
 
 ## Compatibility
 

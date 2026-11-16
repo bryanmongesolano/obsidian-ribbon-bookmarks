@@ -54,7 +54,9 @@ body.rb-is-dragging {
 	align-items: center;
 	justify-content: center;
 	color: var(--text-faint);
-	cursor: help;
+	cursor: pointer;
+	padding: 2px;
+	margin: -2px;
 	transition: color 120ms ease;
 }
 
@@ -65,6 +67,10 @@ body.rb-is-dragging {
 .rb-help-icon svg.svg-icon {
 	width: 14px;
 	height: 14px;
+}
+
+.tooltip.rb-help-tooltip {
+	transform: none;
 }
 
 /* Keep the native icon color; never force a fill on Lucide outline icons */
@@ -128,78 +134,89 @@ body.rb-is-dragging {
 }
 
 /* ==========================================================================
-   Minimal modal (new / edit item or folder)
+   Modal (new / edit item or folder)
    ========================================================================== */
-.modal.rb-bookmark-modal {
+body:not(.is-phone) .modal.rb-bookmark-modal {
 	width: min(540px, 92vw);
 	padding: 16px 20px 18px;
 }
 
-/* Header: title on the left and the close button on the right, on the same line,
-   with a single divider below */
-.modal.rb-bookmark-modal .modal-header {
-	display: flex;
-	align-items: center;
-	min-height: 30px;
-	height: auto;
-	margin: 0 0 12px 0;
-	padding: 0 32px 10px 0;
-	border-bottom: 1px solid var(--background-modifier-border);
+.modal.rb-bookmark-modal .modal-title {
+	text-align: center;
+	margin-inline: auto;
 }
 
-.modal.rb-bookmark-modal .modal-title {
+/* Stacked fields: label on top-left tight against the input, separated blocks */
+.modal.rb-bookmark-modal .rb-form {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	margin-bottom: 14px;
+}
+
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	justify-content: flex-start;
+	gap: 4px;
+	border-top: none;
+	border-bottom: none;
+	padding: 0;
 	margin: 0;
-	font-size: var(--font-ui-medium);
-	font-weight: var(--font-semibold);
-	line-height: 24px;
+	min-height: 0;
+}
+
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-info {
+	width: 100%;
+	margin: 0;
+	padding: 0;
 	text-align: start;
 }
 
-.modal.rb-bookmark-modal .modal-close-button {
-	top: 14px;
-	inset-inline-end: 16px;
-	height: 26px;
-	width: 26px;
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-name,
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-description {
+	margin: 0;
+}
+
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-control {
 	display: flex;
+	flex-direction: row;
 	align-items: center;
-	justify-content: center;
+	justify-content: flex-start;
+	gap: 8px;
+	width: 100%;
+	min-height: 0;
 	margin: 0;
 	padding: 0;
 }
 
-/* No separators between fields, with a tight vertical rhythm.
-   The extra .rb-form class raises specificity above Obsidian's defaults. */
-.modal.rb-bookmark-modal .rb-form .setting-item {
-	border-top: none;
-	border-bottom: none;
-	padding: 5px 0;
-	min-height: 0;
-	align-items: center;
-}
-
-.modal.rb-bookmark-modal .rb-form .setting-item-info {
-	margin: 0;
-}
-
-.modal.rb-bookmark-modal .rb-form .setting-item-name,
-.modal.rb-bookmark-modal .rb-form .setting-item-description {
-	margin: 0;
-}
-
-.modal.rb-bookmark-modal .rb-form .setting-item-control {
-	min-height: 0;
-	margin: 0;
-}
-
-/* Name, URL and file inputs share the same comfortable width */
-.modal.rb-bookmark-modal .setting-item-control input.rb-wide-input {
-	width: 300px;
+/* Name, URL, file inputs and dropdowns take full width */
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-control input.rb-wide-input,
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-control select.dropdown {
+	width: 100%;
 	max-width: 100%;
+	flex: 1 1 auto;
+	min-width: 0;
+	margin: 0;
+}
+
+/* File browse button with width equal to height */
+.modal.rb-bookmark-modal .rb-form .setting-item.rb-field-item .setting-item-control button.rb-file-browse-btn {
+	width: var(--input-height);
+	height: var(--input-height);
+	aspect-ratio: 1 / 1;
+	flex: 0 0 var(--input-height);
+	padding: 0;
+	margin: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 }
 
 /* Vault file results (only visible while typing a path) */
 .rb-vault-file-results {
-	margin: 4px 0 8px;
+	margin: 2px 0 0;
 	max-height: 140px;
 	overflow-y: auto;
 	display: flex;
@@ -390,3 +407,25 @@ body.rb-is-dragging {
 	gap: 8px;
 	margin-left: auto;
 }
+
+/* ==========================================================================
+   Settings bookmark list (normal text color & native <select> on "+" button)
+   ========================================================================== */
+.setting-group.rb-bookmarks-list .setting-items .setting-item.mod-action .setting-item-name {
+	color: var(--text-normal);
+}
+
+.rb-settings-add-btn {
+	position: relative;
+	overflow: hidden;
+}
+
+.rb-settings-add-btn select.rb-native-add-select {
+	opacity: 0;
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	cursor: pointer;
+}
+
